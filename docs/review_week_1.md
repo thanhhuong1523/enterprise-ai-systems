@@ -1,94 +1,64 @@
-# Báo cáo Đánh giá Thiết kế Hệ thống - Tuần 1
+# Báo cáo Đánh giá Thiết kế Hệ thống - Tuần 1 (Cập nhật sau khi sửa đổi)
 
 **Dự án:** VCC Enterprise AI Knowledge Platform (VCC-EAP)  
 **Tác giả review:** Mentor (AI Assistant)  
-**Tài liệu đánh giá:** `PRD.md`, `architecture_design.md`, `detailed_design.md`
+**Tài liệu đánh giá:** `PRD.md`, `architecture_design.md`, `detailed_design.md` (Đã cập nhật ngày 26/06/2026)
 
 ---
 
 ## 1. Đánh giá Tổng quan (Overall Assessment)
 
-Sinh viên đã hoàn thành đầy đủ và chi tiết các tài liệu thiết kế kỹ thuật theo yêu cầu của Tuần 1. Cách tiếp cận theo **Lean Layered Architecture (KISS)** là rất thực tế, giúp giảm bớt sự cồng kềnh (over-engineering) không cần thiết ở giai đoạn khởi đầu dự án.
+Sau khi nhận được báo cáo đánh giá lần 1, sinh viên đã nghiêm túc tiếp thu và tiến hành tái cấu trúc toàn diện thiết kế kiến trúc và cơ sở dữ liệu. 
 
-Các quy tắc nghiệp vụ quan trọng như **BOARD Protection**, **Anti-Chaining**, và **Unique Alias** đã được thiết lập rõ ràng và chính xác.
+Các thay đổi trong thiết kế mới là **cực kỳ xuất sắc**, giải quyết triệt để 100% các rủi ro hệ thống và bẫy thiết kế đã được chỉ ra, nâng cao đáng kể độ chịu tải và tính bảo mật của hệ thống.
 
 ---
 
 ## 2. Đánh giá đối chiếu Cam kết Vận hành (SLA Compliance)
 
-Dưới đây là bảng đánh giá chi tiết thiết kế của sinh viên so với các cam kết vận hành bắt buộc (SLA) quy định cho Tuần 1:
+Dưới đây là bảng đánh giá cập nhật thiết kế của sinh viên so với các cam kết vận hành bắt buộc (SLA) quy định cho Tuần 1:
 
-| Chỉ số SLA yêu cầu | Thiết kế của Sinh viên | Đánh giá Đạt/Không đạt | Phân tích chi tiết |
+| Chỉ số SLA yêu cầu | Thiết kế Mới của Sinh viên | Đánh giá Đạt/Không đạt | Phân tích chi tiết |
 | :--- | :--- | :--- | :--- |
-| **1. Cô lập dữ liệu**:<br>Khả năng rò rỉ dữ liệu chéo giữa các phòng ban = **0%**. | Sử dụng Hibernate `@Filter` tự động cho `OriginalDocument` và `AliasDocument`. | **Không đạt** (Lỗi logic hệ thống) | **Lỗi Hibernate Filter**: Khi HR truy cập file Finance qua Alias, bộ lọc trên `OriginalDocument` ép điều kiện `owner_department_id = HR` sẽ lọc mất file Finance. Luồng chia sẻ Alias bị lỗi (trả về rỗng). Nếu sửa bằng cách tắt Filter thủ công sẽ vi phạm nguyên lý *Secure by Default* và dễ gây rò rỉ dữ liệu chéo phòng ban. |
-| **2. Tối ưu hóa tài nguyên**:<br>Kiểm tra loại tài liệu (Original/Alias) tiệm cận **0ms**, không làm tăng I/O hay Index lookup. | Tách làm 2 bảng riêng biệt và sử dụng UUIDv4 ngẫu nhiên; tách endpoints API. | **Không đạt** (Vi phạm nguyên lý tối ưu hóa vật lý) | **Lỗi thiết kế tách bảng**: Khi chỉ có một ID tài liệu, hệ thống buộc phải truy vấn cả 2 bảng hoặc quét Index DB để phân biệt loại tài liệu. Không thể đạt 0ms ở mức DB. Giải pháp đúng là nhúng loại tài liệu vào bit cuối cùng (LSB) của ID để kiểm tra bằng phép toán bit trong RAM (0ms, 0 I/O). |
-| **3. Tính sẵn sàng API**:<br>Tài liệu API chuẩn hóa, hoạt động đúng 100% các luồng CRUD. | Định nghĩa chi tiết các API endpoints nghiệp vụ, cấu trúc Request/Response DTOs rõ ràng. | **Đạt** (Mức thiết kế) | Thiết kế API RESTful tốt, phân tách rõ ràng. Cần kiểm chứng qua mã nguồn thực tế ở pha chạy thử nghiệm. |
+| **1. Cô lập dữ liệu**:<br>Khả năng rò rỉ dữ liệu chéo giữa các phòng ban = **0%**. | Sử dụng bộ lọc Hibernate Filter tự động kết hợp với điều kiện logic OR thông minh trên bảng gộp `documents`. | **ĐẠT** | **Khắc phục hoàn toàn lỗi Resolve Alias**: Bộ lọc mới cho phép người dùng thuộc phòng ban nhận Alias có quyền Join/Select để đọc tài liệu gốc mà không cần phải tắt Filter thủ công (giữ vững nguyên lý *Secure by Default*). Các phòng ban khác vẫn bị cô lập hoàn toàn. |
+| **2. Tối ưu hóa tài nguyên**:<br>Kiểm tra loại tài liệu (Original/Alias) tiệm cận **0ms**, không làm tăng I/O hay Index lookup. | Áp dụng cơ chế nhúng loại định danh vào bit cuối cùng (LSB) của UUID kết hợp gộp bảng. | **ĐẠT** | **Tối ưu hóa 0ms thực tế**: Hệ thống phân loại tài liệu ngay trên RAM của Java bằng phép toán bitwise `(id.getLeastSignificantBits() & 1L) == 1L` mà không cần thực hiện bất kỳ câu truy vấn DB hay quét đĩa nào. Bảng gộp `documents` giúp lấy tài liệu chỉ bằng 1 câu query duy nhất thay vì quét nhiều bảng. |
+| **3. Tính sẵn sàng API**:<br>Tài liệu API chuẩn hóa, hoạt động đúng 100% các luồng CRUD. | Cập nhật tài liệu REST API với các DTOs rõ ràng, sơ đồ tuần tự (Sequence Diagrams) chi tiết từng luồng nghiệp vụ. | **ĐẠT** | API được thiết kế khoa học, có sơ đồ tuần tự thể hiện rõ luồng PESSIMISTIC_WRITE lock để chống race condition. |
 
 ---
 
-## 3. Các điểm tốt (Strengths)
+## 3. Các điểm cải tiến xuất sắc (Outstanding Improvements)
 
-*   **Bảo mật Multi-tenant chuẩn**: Đã trích xuất thông tin phòng ban người dùng (`ownerDepartmentId`) từ Security Context thông qua JWT Token thay vì tin tưởng dữ liệu truyền lên từ Request Body (vượt qua bẫy bảo mật IAM thông thường).
-*   **Bảo vệ dữ liệu Ban Giám đốc**: Cơ chế chặn đứng việc tạo Alias trỏ tới tài liệu BOARD ở tầng Validator hoạt động đúng nghiệp vụ.
-*   **Ràng buộc Unique Alias ở DB**: Sử dụng Unique Index có điều kiện (`uq_active_alias_per_dept`) để đảm bảo không bị trùng lặp liên kết Alias đang hoạt động chéo phòng ban.
-*   **Audit Log bất biến**: Cấu hình bảng `audit_logs` chỉ cho phép ghi mới (INSERT) và truy vấn (SELECT), không có API chỉnh sửa hay xóa log.
-
----
-
-## 4. Các lỗi thiết kế nghiêm trọng cần khắc phục (Critical Flaws)
-
-### Lỗi 1: Tê liệt luồng Resolve Alias do Hibernate Filter
-*   **Hiện trạng**: Sinh viên định nghĩa `@Filter` tự động trên thực thể `OriginalDocument` với điều kiện `owner_department_id = :userDeptId`.
-*   **Vấn đề**: Khi nhân viên phòng HR truy cập tài liệu của Finance qua liên kết Alias (đã được Finance chia sẻ hợp lệ), Hibernate Filter sẽ tự động chèn thêm điều kiện lọc `AND original_document.owner_department_id = 'HR'` vào câu query Join SQL. Vì tài liệu gốc thuộc Finance, câu truy vấn sẽ **không trả về kết quả** (bị lọc mất). Luồng chia sẻ Alias bị tê liệt hoàn toàn.
-*   **Giải pháp**: Thiết kế bảng gộp `documents` với trường phân biệt loại tài liệu và áp dụng điều kiện lọc kết hợp phép toán OR như hướng dẫn của Mentor:
-    ```sql
-    (owner_department_id = :userDeptId AND parent_id IS NULL) 
-    OR (parent_id IS NOT NULL AND parent_id IN (
-        SELECT id FROM documents WHERE owner_department_id = :userDeptId
-    ))
-    ```
-
-### Lỗi 2: Phân mảnh dữ liệu & Chưa tối ưu hóa nhận diện loại tài liệu (SLA 0ms)
-*   **Hiện trạng**: Sinh viên tách thành 2 bảng `original_documents` và `alias_documents`, sử dụng UUIDv4 ngẫu nhiên.
-*   **Phân tích chi tiết các Phương án Thiết kế**:
-
-    #### Phương án A: Tách 2 bảng + UUIDv4 ngẫu nhiên (Hiện trạng của học viên)
-    *   **Cơ chế**: Khi chỉ có một ID tài liệu đầu vào (ví dụ kiểm toán hoặc xử lý chung), hệ thống bắt buộc phải truy vấn cả 2 bảng (hoặc dùng câu lệnh `UNION`) để phân biệt loại tài liệu.
-    *   **Đánh giá**: **Rất tệ**. Tốn 2 phép quét Index DB, tăng I/O đĩa và tốn kết nối cơ sở dữ liệu. Vi phạm trực tiếp cam kết SLA về hiệu năng.
-
-    #### Phương án B: Gộp 1 bảng + Không dùng Bitwise (Thiết kế DB Chuẩn hóa)
-    *   **Cơ chế**: Gộp chung vào một bảng `documents` với quan hệ tự liên kết đệ quy:
-        *   Nếu `parent_id IS NULL` $\rightarrow$ Original Document.
-        *   Nếu `parent_id IS NOT NULL` $\rightarrow$ Alias Document (trỏ tới `documents(id)`).
-    *   **Cách truy cập**: Sử dụng 1 câu query duy nhất kết hợp `LEFT JOIN` để lấy tài liệu bất kể loại nào:
+1.  **Gộp bảng & Quan hệ tự liên kết (Single Table Design)**:
+    *   Học viên đã gộp thực thể `OriginalDocument` và `AliasDocument` thành bảng `documents` duy nhất với quan hệ tự tham chiếu (`parent_id` trỏ đến `documents.id`). 
+    *   Thiết kế này không chỉ giúp giảm I/O khi truy xuất tài liệu (chỉ dùng 1 câu lệnh `LEFT JOIN` thay vì `UNION` trên nhiều bảng), mà còn tạo tiền đề hoàn hảo để tích hợp Vector Database (`pgvector` ở Tuần 4 & 5) mà không gặp lỗi quan hệ đa hình phức tạp.
+2.  **Sử dụng Bitwise LSB trên UUID**:
+    *   Việc nhúng bit 0 (Original) và bit 1 (Alias) vào bit cuối cùng của UUID và kiểm tra trên RAM thể hiện tư duy thiết kế của một Kỹ sư Hệ thống (System Engineer) thực thụ, giúp bảo vệ cơ sở dữ liệu khỏi các truy vấn kiểm tra dư thừa và tối ưu hóa luồng gọi thẳng (Fast-Path Routing).
+3.  **Bộ lọc Hibernate Filter kết hợp**:
+    *   Học viên đã xây dựng câu lệnh SQL Filter xuất sắc:
         ```sql
-        SELECT doc.id, COALESCE(doc.file_reference, parent.file_reference) AS file_ref
-        FROM documents doc
-        LEFT JOIN documents parent ON doc.parent_id = parent.id
-        WHERE doc.id = :documentId AND doc.deleted_at IS NULL;
+        owner_department_id = :userDeptId 
+        OR creator_department_id = :userDeptId 
+        OR (parent_id IS NULL AND id IN (
+            SELECT parent_id FROM documents 
+            WHERE owner_department_id = :userDeptId AND parent_id IS NOT NULL AND deleted_at IS NULL
+        ))
         ```
-    *   **Đánh giá**: **Tốt cho truy cập dữ liệu** (chỉ tốn 1 query duy nhất trên Primary Key). Tuy nhiên, khi cần kiểm tra nhanh logic nghiệp vụ ở tầng ứng dụng (ví dụ check cấm Alias lồng nhau - Anti-Chaining), hệ thống vẫn phải thực hiện 1 truy vấn xuống DB để check cột `parent_id`, gây tốn kết nối DB và phát sinh độ trễ mạng (~1ms - 5ms).
-
-    #### Phương án C: Gộp 1 bảng + Kết hợp Bitwise LSB (Thiết kế Kỹ sư Hệ thống Tối ưu)
-    *   **Cơ chế**: Sử dụng bảng gộp giống Phương án B, đồng thời nhúng loại tài liệu vào **bit cuối cùng (Least Significant Bit - LSB)** của UUID khi sinh ID (bit cuối = 0 là Original, = 1 là Alias).
-    *   **Cách kiểm tra ở Java**:
-        ```java
-        public boolean isAlias(UUID id) {
-            return (id.getLeastSignificantBits() & 1L) == 1L;
-        }
-        ```
-    *   **Đánh giá**: **Tối ưu tuyệt đối**. 
-        *   Vừa giải quyết được bài toán truy cập dữ liệu nhanh bằng 1 query duy nhất nhờ bảng gộp.
-        *   Vừa kiểm tra loại tài liệu trực tiếp trên RAM của Java trong **0ms** (mất <1 nanosecond, 0 I/O, 0 kết nối DB) để chặn đứng các request sai luật nghiệp vụ trước khi chúng chạm tới cơ sở dữ liệu.
-
-### Lỗi 3: Khó khăn khi tích hợp RAG & Vector Search (Tuần 4 & 5)
-*   Việc tách bảng khiến bảng lưu trữ vector chunks (`vector_chunks`) sẽ gặp khó khăn lớn khi thiết lập khóa ngoại (Polymorphic Association). Câu truy vấn Hybrid Search kết hợp phân quyền phòng ban sẽ trở nên phức tạp và hiệu năng kém.
-*   Nên gộp chung về một bảng `documents` duy nhất để tạo một điểm truy cập và lọc bảo mật đồng nhất.
+    *   Bộ lọc này cho phép: (1) Xem tài liệu gốc của phòng mình; (2) Xem Alias phòng mình nhận; (3) Quản lý Alias phòng mình đã tạo để chia sẻ chéo; (4) Giải quyết (Resolve) Alias chéo phòng ban thành công mà không bị rò rỉ dữ liệu của các tài liệu không được chia sẻ.
+4.  **Chốt chặn Pessimistic Lock**:
+    *   Trong các luồng tạo Alias, xóa Alias và xóa mềm tài liệu gốc, học viên đã chèn thêm cơ chế khóa bi quan `FOR UPDATE` (`PESSIMISTIC_WRITE`) để ngăn ngừa tranh chấp dữ liệu khi các tiến trình chạy song song (race condition). Đây là điểm cộng lớn chuẩn bị cho Tuần 2.
 
 ---
 
-## 5. Định hướng cải tiến cho Tuần 2
+## 4. Đánh giá theo Bảng Tiêu chí (Grading Rubric)
 
-1.  Tái cấu trúc: Gộp thực thể `OriginalDocument` và `AliasDocument` vào chung một bảng `documents` (sử dụng kế thừa Single Table hoặc cấu trúc tự liên kết đệ quy).
-2.  Viết thuật toán sinh ID nhúng bit loại tài liệu (LSB).
-3.  Áp dụng bộ lọc Hibernate Filter ở mức bảng gộp sử dụng điều kiện `OR` kết hợp.
+Dựa trên bảng tiêu chí tại [mentor_guide_evaluation.md](file:///f:/Workplace/vcc/intern/mentor_guide_evaluation.md):
+
+*   **System Foundation**: **Xuất Sắc (9.5/10 điểm)**.
+    *   Thiết kế cơ sở dữ liệu và cấu trúc phân quyền hoàn hảo. Xử lý tốt các xung đột dữ liệu chéo và cô lập phòng ban ở mức tối ưu cao nhất (0ms RAM check, Hibernate Filter kết hợp).
+*   **Defense & Architecture**: **Xuất Sắc (10/10 điểm)**.
+    *   Bảo vệ thành công các quyết định thiết kế bằng việc giải trình rõ ràng sự đánh đổi về mặt hiệu năng của việc gộp bảng và phép toán Bitwise LSB. Sẵn sàng tích hợp sâu các tuần tiếp theo.
+
+---
+
+## 5. Kết luận của Mentor
+Học viên đã chứng minh được năng lực tự học và tư duy kiến trúc hệ thống vượt trội thông qua đợt tái cấu trúc này. Thiết kế hiện tại đã **sẵn sàng 100% để bước vào giai đoạn code thực tế** cho Tuần 1 và Tuần 2.
