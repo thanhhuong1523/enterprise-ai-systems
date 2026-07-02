@@ -63,6 +63,7 @@ graph TB
         DC[DocumentController]
         DEPC[DepartmentController]
         UC[UserController]
+        AC[AuthController]
     end
 
     subgraph DTO [DTO Layer - dto]
@@ -74,6 +75,7 @@ graph TB
         DS[DocumentService]
         US[UserService]
         DEPS[DepartmentService]
+        AS[AuthService]
         ROV[ResourceOwnershipValidator]
     end
 
@@ -107,13 +109,17 @@ graph TB
         HAF[Hibernate Filter Auto-Injection]
     end
 
-    DC & DEPC & UC --> SEC
-    DC & DEPC & UC --> GEH
-    DC & DEPC & UC --> REQ
+    DC & DEPC & UC & AC --> SEC
+    DC & DEPC & UC & AC --> GEH
+    DC & DEPC & UC & AC --> REQ
     
     DC --> DS
     DEPC --> DEPS
     UC --> US
+    AC --> AS
+    
+    AS --> UR
+    AS --> SEC
     
     DS --> ROV
     DS & US & DEPS --> SCH
@@ -144,7 +150,7 @@ graph TB
 ### 4.1. Cô lập tự động qua Hibernate Filter kết hợp (Secure by Default)
 Mọi truy vấn dữ liệu từ ứng dụng lên bảng gộp `documents` đều bị lọc tự động bởi Hibernate Filter được cấu hình trên thực thể `Document` để đảm bảo cô lập tuyệt đối mà không làm đứt gãy luồng chia sẻ và thu hồi Alias.
 
-Hệ thống sử dụng thêm trường phi bình thường hóa `creator_department_id` (lưu phòng ban sở hữu tài liệu gốc đối với Alias) để tối ưu hóa truy vấn xem Alias mà không cần dùng câu truy vấn con lồng nhau cho Alias. Bộ lọc áp dụng điều kiện kết hợp:
+Hệ thống sử dụng thêm trường phi bình thường hóa `creator_department_id` (lưu phòng ban sở hữu tài liệu gốc đối với Alias) nhằm tối ưu hóa hiệu năng, giảm thiểu các phép JOIN phức tạp và các subquery đệ quy tự liên kết. Bộ lọc áp dụng điều kiện kết hợp:
 ```sql
 owner_department_id = :userDeptId 
 OR creator_department_id = :userDeptId
@@ -156,6 +162,27 @@ OR (parent_id IS NULL AND id IN (
 - Vế thứ nhất (`owner_department_id = :userDeptId`) đảm bảo phòng ban xem được tài liệu gốc do mình tạo ra và các Alias do mình nhận được (Alias lưu `owner_department_id` là phòng ban nhận).
 - Vế thứ hai (`creator_department_id = :userDeptId`) đảm bảo phòng ban gửi (chủ sở hữu tài liệu gốc) vẫn nhìn thấy và có quyền quản lý, xóa/thu hồi các Alias mà họ đã tạo ra để chia sẻ sang phòng ban khác mà không cần thực hiện subquery phức tạp.
 - Vế thứ ba (`parent_id IS NULL AND id IN (...)`) đảm bảo khi phòng ban nhận truy cập để Resolve một Alias, Hibernate Filter cho phép truy vấn Join/Select đến tài liệu gốc (parent) của phòng ban khác mà không bị lọc mất.
+
+#### Quyết định Phi chuẩn hóa và Cơ chế Nhất quán:
+- **Lý do phi chuẩn hóa**: Để kiểm tra quyền truy cập của phòng ban gửi (chủ sở hữu gốc) đối với các Alias đã phát hành, nếu không phi chuẩn hóa, PostgreSQL sẽ phải thực hiện một phép JOIN bổ sung hoặc một subquery tới bảng gốc (`parent_id`) để xác định phòng ban sở hữu. Trường `creator_department_id` cho phép lọc trực tiếp trên hàng hiện tại của bảng `documents` trong 1 câu SQL phẳng, giảm tải CPU và tăng tốc độ Index Scan.
+- **Đảm bảo nhất quán**: Căn cứ quy tắc nghiệp vụ BR-09, phòng ban sở hữu của một tài liệu gốc là cố định và bất biến. Do đó, khi Alias được tạo ra và gán `creator_department_id` bằng ID phòng ban sở hữu tài liệu gốc, giá trị này sẽ không bao giờ thay đổi (`updatable = false`). Điều này triệt tiêu hoàn toàn rủi ro lệch dữ liệu (data drift), bảo đảm dữ liệu luôn nhất quán tuyệt đối với tài liệu gốc.
+
+#### Ràng buộc Toàn vẹn CSDL (CHECK Constraints):
+Để ngăn ngừa dữ liệu rơi vào trạng thái không hợp lệ do lỗi ứng dụng hoặc thao tác thủ công, CSDL áp dụng ràng buộc CHECK constraint nghiêm ngặt:
+- Đối với **Original**: `parent_id` bắt buộc NULL, `file_reference` bắt buộc NOT NULL, và `creator_department_id` bắt buộc NULL.
+- Đối với **Alias**: `parent_id` bắt buộc NOT NULL, `file_reference` bắt buộc NULL, và `creator_department_id` bắt buộc NOT NULL.
+```sql
+ALTER TABLE documents ADD CONSTRAINT chk_document_type_integrity CHECK (
+    (parent_id IS NULL AND file_reference IS NOT NULL AND creator_department_id IS NULL) OR
+    (parent_id IS NOT NULL AND file_reference IS NULL AND creator_department_id IS NOT NULL)
+);
+```
+
+#### Đánh giá Hiệu năng (Performance Assessment):
+- **Đánh giá Hiệu năng**: Câu điều kiện `OR` kết hợp `IN (subquery)` có thể gây suy giảm hiệu năng khi bảng dữ liệu vượt ngưỡng triệu bản ghi. Phép toán `OR` có thể khiến PostgreSQL Optimizer chuyển từ Index Scan sang quét tuần bản ghi (Seq Scan) hoặc BitmapOr Scan tốn RAM. Câu subquery `IN` yêu cầu tìm kiếm đệ quy các tài liệu liên kết, tạo thêm chi phí tính toán tỷ lệ thuận với số lượng Alias. Tuy nhiên, đối với quy mô và yêu cầu hiện tại, cơ chế Hibernate Filter vẫn đáp ứng hoàn hảo và hoạt động ổn định.
+
+#### Chống Alias Chaining ở Tầng Nghiệp vụ:
+- Hệ thống cấm tuyệt đối việc tạo Alias trỏ tới một Alias khác. Logic xác thực này được thực hiện trước khi tạo Alias tại tầng Service bằng cách truy vấn thực thể từ DB và kiểm tra `parentId` cũng như bit cuối LSB của UUID thực thể từ DB để đảm bảo nó là Original (LSB = 0). Hệ thống tuyệt đối không tin tưởng hay phụ thuộc vào bất kỳ thông số loại tài liệu nào do client gửi lên nhằm tránh Parameter Tampering.
 
 ### 4.2. Ranh giới Bảo mật Ban Giám đốc (BOARD Boundary)
 Phòng ban `BOARD` được cô lập bảo mật tuyệt đối:
@@ -204,9 +231,14 @@ erDiagram
 ```
 
 Cơ sở dữ liệu PostgreSQL 17 lưu trữ dữ liệu dưới cấu trúc bảng chuẩn hóa:
-*   `departments`: Danh sách phòng ban (BOARD, HR, FINANCE, R&D).
-*   `users`: Danh sách nhân viên, mỗi nhân viên thuộc duy nhất 1 phòng ban.
-*   `documents`: Bảng gộp lưu trữ cả tài liệu gốc và Alias. Có trường phi bình thường hóa `creator_department_id` (lưu phòng ban sở hữu tài liệu gốc đối với Alias). Hệ thống nhúng loại tài liệu vào Least Significant Bit (LSB) của UUID (LSB = 0 là tài liệu gốc, LSB = 1 là Alias) để nhận diện loại tài liệu nhanh chóng ở RAM bằng phép toán dịch/kiểm tra bit. Có Unique Index có điều kiện trên `(parent_id, owner_department_id) WHERE deleted_at IS NULL` để chống trùng lặp Alias.
+*   departments: Danh sách phòng ban (BOARD, HR, FINANCE, R&D).
+*   users: Danh sách nhân viên, mỗi nhân viên nghiệp vụ bắt buộc thuộc duy nhất 1 phòng ban (riêng SYSTEM_ADMIN có department_id bằng NULL và áp dụng CHECK constraint chk_user_department_integrity để ràng buộc).
+*   `documents`: Bảng gộp lưu trữ cả tài liệu gốc và Alias. 
+    - Có trường phi bình thường hóa `creator_department_id` (lưu phòng ban sở hữu tài liệu gốc đối với Alias) nhằm tối ưu hóa câu SQL lọc của Hibernate Filter.
+    - Áp dụng cơ chế bit UUID LSB (LSB = 0 là tài liệu gốc, LSB = 1 là Alias) để nhận diện loại tài liệu nhanh chóng ở RAM trong 0ms.
+    - Có Unique Index có điều kiện trên `(parent_id, owner_department_id) WHERE deleted_at IS NULL` để chống trùng lặp Alias.
+    - Áp dụng ràng buộc cứng cấp CSDL `chk_document_type_integrity` (CHECK constraints) để đảm bảo dữ liệu không rơi vào trạng thái sai (Original có `file_reference` và `parent_id`/`creator_department_id` NULL; Alias ngược lại).
+    - Trường `business_code` (Unique Index, NOT NULL) yêu cầu cả Original (`ORIG_xxxxxx`) và Alias (`ALIA_xxxxxx`) có mã định danh nghiệp vụ riêng biệt và duy nhất nhằm đáp ứng chỉ mục duy nhất dưới DB, bảo mật thông tin mã gốc, và hỗ trợ phòng nhận tự phân loại tài liệu theo hệ thống của họ.
 
 ---
 

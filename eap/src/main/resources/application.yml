@@ -1,0 +1,41 @@
+spring:
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/vcc_eap}
+    username: ${DB_USERNAME:vcc_admin}
+    password: ${DB_PASSWORD:secure_db_password}
+    driver-class-name: org.postgresql.Driver
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      timeout: ${REDIS_TIMEOUT:5000ms}
+      lettuce:
+        pool:
+          max-active: ${REDIS_POOL_MAX_ACTIVE:8}
+          max-idle: ${REDIS_POOL_MAX_IDLE:8}
+          min-idle: ${REDIS_POOL_MIN_IDLE:0}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+  servlet:
+    multipart:
+      max-file-size: 50MB
+      max-request-size: 50MB
+      enabled: true
+
+jwt:
+  secret: ${JWT_SECRET:vcc-eap-super-secret-signing-key-256-bits-base64-secure-value-safe-for-hs256}
+  expiration-ms: 900000 # 15 minutes
+  refresh-expiration-ms: 604800000 # 7 days
+
+eap:
+  upload:
+    dir: ./eap-storage

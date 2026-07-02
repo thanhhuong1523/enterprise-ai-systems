@@ -1,0 +1,28 @@
+# ==========================================
+# VCC-EAP GITIGNORE
+# ==========================================
+
+# Environment variables (secret keys)
+.env
+
+# IntelliJ IDEA project files
+.idea/
+*.iml
+
+# OS files
+.DS_Store
+
+# Java Build Directories
+target/
+*.jar
+*.war
+*.ear
+
+# Frontend Build Directories & Dependencies
+node_modules/
+dist/
+.eslintcache
+*.log
+
+# Storage
+eap-storage/

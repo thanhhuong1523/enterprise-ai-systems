@@ -52,7 +52,7 @@ com.vccorp.eap
 
 ### 3.1. Sơ đồ Usecase Tổng quan
 
-Sơ đồ mô tả các tác nhân chính và các ca sử dụng tương ứng trong hệ thống EAP:
+Sơ đồ mô tả các tác nhân chính và các ca sử dụng tương ứng trong hệ thống EAP, bao gồm cả ca sử dụng đăng nhập hệ thống:
 
 ```mermaid
 graph LR
@@ -64,6 +64,7 @@ graph LR
     end
 
     subgraph Boundary [Hệ thống VCC-EAP]
+        UC_LOGIN(Đăng nhập hệ thống)
         UC_CREATE_DEPT(Tạo phòng ban mới)
         UC_CREATE_USER(Tạo người dùng mới)
         UC_UPLOAD_DOC(Tải lên tài liệu gốc)
@@ -73,6 +74,11 @@ graph LR
         UC_RESOLVE_ALIAS(Giải quyết Alias xem tài liệu)
         UC_DELETE_ALIAS(Xóa/Thu hồi liên kết Alias)
     end
+
+    SYSTEM_ADMIN --> UC_LOGIN
+    ROLE_EMPLOYEE --> UC_LOGIN
+    ROLE_DEPT_MANAGER --> UC_LOGIN
+    ROLE_BOARD --> UC_LOGIN
 
     SYSTEM_ADMIN --> UC_CREATE_DEPT
     SYSTEM_ADMIN --> UC_CREATE_USER
@@ -240,10 +246,9 @@ graph LR
     ROLE_EMPLOYEE((ROLE_EMPLOYEE)) --> UC(Giải quyết Alias xem tài liệu)
     ROLE_DEPT_MANAGER((ROLE_DEPT_MANAGER)) --> UC
 ```
-
 *   **Tác nhân**: `ROLE_EMPLOYEE`, `ROLE_DEPT_MANAGER`
-*   **Mô tả**: Người dùng phòng nhận giải quyết Alias để xem nội dung tài liệu gốc chéo phòng ban.
-*   **Kiểm soát quyền nghiêm ngặt**: Chỉ người dùng thuộc phòng ban nhận của Alias (`alias.ownerDepartmentId == currentUser.departmentId`) mới được gọi API này. Bất kỳ phòng ban nào khác gọi API này đều bị chặn và trả về lỗi 404 để bảo mật dữ liệu tuyệt đối.
+*   **Mô tả**: Người dùng thuộc phòng ban nhận HOẶC phòng ban tạo giải quyết Alias để xem nội dung tài liệu gốc chéo phòng ban.
+*   **Kiểm soát quyền nghiêm ngặt**: Chỉ người dùng thuộc phòng ban nhận của Alias (`alias.ownerDepartmentId == currentUser.departmentId`) HOẶC phòng ban tạo Alias (`alias.creatorDepartmentId == currentUser.departmentId`) mới được quyền gọi API này để xem dữ liệu tệp tin gốc. Bất kỳ phòng ban nào khác gọi API này đều bị chặn và trả về lỗi 404 để bảo mật dữ liệu tuyệt đối.
 *   **Luồng sự kiện chính**:
     1. Người dùng gửi yêu cầu GET kèm ID của Alias.
     2. Bộ lọc tự động Hibernate Filter giới hạn truy vấn chỉ cho phép xem bản ghi Alias nếu phòng ban trùng khớp với phòng ban nhận (`owner_department_id`) hoặc phòng ban tạo (`creator_department_id`).
@@ -270,6 +275,34 @@ graph LR
 
 ---
 
+#### 3.2.9. UC-09: Đăng nhập hệ thống (System Login)
+
+**Sơ đồ Usecase Chi tiết:**
+```mermaid
+graph LR
+    SYSTEM_ADMIN((SYSTEM_ADMIN)) --> UC(Đăng nhập hệ thống)
+    ROLE_EMPLOYEE((ROLE_EMPLOYEE)) --> UC
+    ROLE_DEPT_MANAGER((ROLE_DEPT_MANAGER)) --> UC
+    ROLE_BOARD((ROLE_BOARD)) --> UC
+```
+
+*   **Tác nhân**: Tất cả các vai trò người dùng (`SYSTEM_ADMIN`, `ROLE_EMPLOYEE`, `ROLE_DEPT_MANAGER`, `ROLE_BOARD`).
+*   **Mô tả**: Người dùng xác thực thông tin tài khoản bằng tên đăng nhập và mật khẩu để lấy token truy cập JWT.
+*   **Tiền điều kiện**: Người dùng đã được Admin khởi tạo tài khoản trong hệ thống.
+*   **Hậu điều kiện**: Hệ thống cấp token JWT hợp lệ chứa thông tin định danh và quyền hạn của người dùng để truy cập các API tài liệu.
+*   **Luồng sự kiện chính**:
+    1. Người dùng gửi yêu cầu đăng nhập kèm `username` và `password`.
+    2. Hệ thống kiểm tra dữ liệu đầu vào.
+    3. Hệ thống truy xuất người dùng theo `username` trong CSDL.
+    4. Hệ thống thực hiện đối khớp mật khẩu bằng thuật toán so sánh BCrypt.
+    5. Hệ thống sinh JWT token chứa các thông tin: `username`, `role`, và `departmentId`.
+    6. Hệ thống phản hồi mã thành công `200 OK` kèm JWT token.
+*   **Ngoại lệ (Luồng lỗi)**:
+    - Sai tên đăng nhập hoặc mật khẩu -> Trả về lỗi `ERR_UNAUTHENTICATED` (401 Unauthorized) với thông điệp bảo mật chung "Tên đăng nhập hoặc mật khẩu không chính xác".
+    - Dữ liệu gửi lên rỗng hoặc sai định dạng DTO -> Trả về lỗi `VALIDATION_ERROR` (400).
+
+---
+
 ## 4. Sơ đồ CSDL và Sơ đồ Lớp Hệ thống (Database Schema & System Class Diagrams)
 
 ### 4.1. Sơ đồ CSDL Chi tiết (Database Schema Diagram - ERD)
@@ -290,7 +323,7 @@ erDiagram
         varchar email UK "NOT NULL"
         varchar password_hash "NOT NULL"
         varchar role "NOT NULL"
-        uuid department_id FK "NOT NULL"
+        uuid department_id FK "Nullable"
     }
 
     DOCUMENTS {
@@ -462,38 +495,59 @@ classDiagram
 *   `username`: VARCHAR(50) (Unique Index, NOT NULL).
 *   `email`: VARCHAR(100) (Unique Index, NOT NULL).
 *   `password_hash`: VARCHAR(255) (NOT NULL).
-*   `role`: VARCHAR(50) (NOT NULL) - Lưu tên Vai trò người dùng dưới dạng chuỗi (Enum).
-*   `department_id`: UUID (Khóa ngoại trỏ đến `departments.id`, NOT NULL).
+*   `role`: VARCHAR(50) (NOT NULL) - Luu ten Vai tro nguoi dung duoi dang chuoi (Enum).
+*   `department_id`: UUID (Khoa ngoai tro den departments.id, Nullable) - Bat buoc phai la NULL doi voi tai khoan SYSTEM_ADMIN, bat buoc phai NOT NULL doi voi cac vai tro nguoi dung nghiep vu con lai (dam bao boi rang buoc chk_user_department_integrity).
 
 ### 5.3. Bảng `documents`
 *   `id`: UUID (Khóa chính) - Nhúng loại tài liệu vào Least Significant Bit (LSB) của UUID:
     - Tài liệu gốc (Original): LSB = `0`.
     - Tài liệu liên kết (Alias): LSB = `1`.
     - Nhận dạng loại tài liệu nhanh chóng ở RAM bằng phép toán dịch/kiểm tra bitwise trên LSB của UUID.
-*   `business_code`: VARCHAR(50) (Unique Index, NOT NULL) - Mã nghiệp vụ duy nhất.
-*   `title`: VARCHAR(255) (NOT NULL) - Tiêu đề hiển thị của tài liệu.
-*   `file_reference`: VARCHAR(500) (Nullable) - Đường dẫn vật lý trên Object Storage (chỉ lưu ở tài liệu gốc).
+*   `business_code`: VARCHAR(50) (Unique Index, NOT NULL) - Mã nghiệp vụ duy nhất của tài liệu.
+    - *Làm rõ quyết định thiết kế*: Vì trường này có ràng buộc `UNIQUE` và `NOT NULL`, cả tài liệu gốc (Original) và tài liệu liên kết (Alias) đều bắt buộc phải sở hữu một mã nghiệp vụ riêng biệt và duy nhất.
+    - *Mục đích nghiệp vụ đối với Original*: Định dạng `ORIG_xxxxxx`, dùng làm mã số định danh lưu trữ hồ sơ, lập danh mục nghiệp vụ vật lý và phục vụ công tác đối soát, kiểm toán nội bộ của phòng ban sở hữu gốc.
+    - *Mục đích nghiệp vụ đối với Alias*: Định dạng `ALIA_xxxxxx`. Alias không sử dụng chung mã của tài liệu gốc vì:
+      1. **Bảo mật và Che giấu thông tin**: Tránh lộ cấu trúc danh mục và mã lưu trữ nội bộ của phòng ban gốc cho phòng ban nhận Alias.
+      2. **Khớp nối quy trình phòng nhận**: Cho phép phòng ban nhận tự phân loại, quản lý và tham chiếu tài liệu được chia sẻ như một tài sản thông tin riêng biệt phù hợp với quy trình và hệ thống lưu trữ nội bộ của họ.
+      3. **Tránh vi phạm ràng buộc CSDL**: Đảm bảo không bị trùng khóa duy nhất (Unique Key) trên bảng `documents` khi lưu trữ tập trung.
+*   `file_reference`: VARCHAR(500) (Nullable) - Đường dẫn vật lý trên Object Storage. Bắt buộc có giá trị đối với tài liệu gốc để truy xuất file; bắt buộc phải là NULL đối với Alias để tránh nhân bản dữ liệu lưu trữ.
 *   `file_size`: BIGINT (Nullable) - Dung lượng file (chỉ lưu ở tài liệu gốc).
 *   `hash`: VARCHAR(64) (Nullable) - SHA-256 hash của tệp tin (chỉ lưu ở tài liệu gốc).
 *   `owner_department_id`: UUID (Khóa ngoại trỏ đến `departments.id`, NOT NULL)
     - Đối với tài liệu gốc: Phòng ban tải lên và sở hữu file.
     - Đối với Alias: Phòng ban nhận được chia sẻ.
 *   `parent_id`: UUID (Khóa ngoại tự liên kết đến `documents.id`, Nullable, updatable = false) - ID tài liệu gốc tương ứng. Khóa cứng bất biến khi tạo.
-*   `creator_department_id`: UUID (Khóa ngoại trỏ đến `departments.id`, Nullable, updatable = false) - ID của phòng tạo ra Alias (phòng sở hữu tài liệu gốc).
+*   `creator_department_id`: UUID (Khóa ngoại trỏ đến `departments.id`, Nullable, updatable = false) - Trường phi chuẩn hóa (Denormalization) lưu phòng ban tạo ra Alias (phòng sở hữu tài liệu gốc).
+    - *Lý do phi chuẩn hóa*: Nhằm tối ưu hóa hiệu năng truy vấn của Hibernate Filter. Nếu không phi chuẩn hóa trường này, khi kiểm tra quyền truy cập Alias của phòng ban gửi (chủ sở hữu), hệ thống bắt buộc phải thực hiện phép JOIN hoặc chạy một Subquery lồng nhau tới bảng gốc (`parent_id`) để xác định phòng ban sở hữu gốc. Bằng việc phi chuẩn hóa `creator_department_id`, câu lệnh SQL lọc tự động của Hibernate Filter giảm thiểu độ phức tạp xuống mức tối đa (chỉ so sánh trực tiếp trên trường của bản ghi hiện tại), loại bỏ hoàn toàn JOIN/subquery đệ quy khi Resolve Alias.
+    - *Cơ chế đảm bảo nhất quán*: Dữ liệu phi chuẩn hóa này được đảm bảo nhất quán tuyệt đối 100% nhờ vào hai yếu tố cốt lõi:
+      1. **Tính bất biến của quyền sở hữu gốc**: Theo Quy tắc Nghiệp vụ BR-09, phòng ban sở hữu tài liệu gốc là cố định và bất biến từ thời điểm tải lên, không bao giờ thay đổi (kể cả khi nhân viên tạo tài liệu luân chuyển phòng ban hoặc nghỉ việc).
+      2. **Tính bất biến của liên kết Alias**: Trường `creator_department_id` chỉ được gán một lần duy nhất lúc tạo Alias (lấy giá trị từ `original.ownerDepartmentId`) và được cấu hình `updatable = false` ở thực thể Hibernate, đồng thời API không cung cấp bất kỳ chức năng chỉnh sửa nào đối với trường này. Do đó, không bao giờ xảy ra hiện tượng lệch dữ liệu (data drift) giữa Alias và tài liệu gốc.
 *   `created_by`: UUID (Khóa ngoại trỏ đến `users.id`, Nullable).
 *   `created_at`: TIMESTAMP (NOT NULL).
 *   `updated_at`: TIMESTAMP (Nullable).
 *   `deleted_at`: TIMESTAMP (Nullable) - Thời điểm xóa mềm.
 
 ### 5.4. Ràng buộc và Chỉ mục CSDL (Database Constraints & Indexes)
-1.  **Kiểm soát loại ID ở tầng Ứng dụng**: Khi sinh ID, hệ thống tự động thiết lập bit cuối của UUID LSB bằng 0 cho tài liệu gốc và bằng 1 cho Alias. Việc xác định loại tài liệu được thực hiện trên RAM bằng hàm dịch/kiểm tra bit (`(id.getLeastSignificantBits() & 1L) == 1L`). Không áp dụng các ràng buộc kiểm tra chuỗi hex chẵn lẻ phức tạp ở cấp CSDL.
-2.  **Chỉ mục duy nhất Alias hoạt động (`uq_active_alias_per_dept`)**: Unique index trên bộ ba `(parent_id, owner_department_id)` với điều kiện `parent_id IS NOT NULL AND deleted_at IS NULL` để đảm bảo mỗi phòng ban chỉ nhận tối đa 1 Alias từ cùng một tài liệu gốc đang hoạt động.
-3.  **Chỉ mục tối ưu hóa Hibernate Filter (`idx_doc_owner_dept` & `idx_doc_creator_dept`)**: Index thường trên cột `owner_department_id` và `creator_department_id` để tăng tốc độ truy vấn lọc tự động chéo phòng ban.
+1.  **Ràng buộc toàn vẹn cấu trúc loại tài liệu (chk_document_type_integrity)**: Đây là chốt chặn cứng ở mức CSDL sử dụng CHECK constraints để đảm bảo dữ liệu không bao giờ rơi vào trạng thái sai cấu trúc nghiệp vụ (ví dụ: tài liệu gốc nhưng thiếu file, hoặc Alias nhưng lại chứa link file vật lý):
+    - Original: parent_id IS NULL AND file_reference IS NOT NULL AND creator_department_id IS NULL.
+    - Alias: parent_id IS NOT NULL AND file_reference IS NULL AND creator_department_id IS NOT NULL.
+2.  **Ràng buộc phòng ban người dùng (chk_user_department_integrity)**: Chốt chặn cứng ở mức CSDL sử dụng CHECK constraints đảm bảo tài khoản quản trị hệ thống không thuộc phòng ban nào và các người dùng nghiệp vụ khác bắt buộc phải thuộc phòng ban:
+    - SYSTEM_ADMIN: department_id IS NULL.
+    - Khác: department_id IS NOT NULL.
+3.  **Kiểm soát loại ID ở tầng Ứng dụng**: Khi sinh ID, hệ thống tự động thiết lập bit cuối của UUID LSB bằng 0 cho tài liệu gốc và bằng 1 cho Alias. Việc xác định loại tài liệu được thực hiện trên RAM bằng hàm dịch/kiểm tra bit.
+4.  **Chỉ mục duy nhất Alias hoạt động (uq_active_alias_per_dept)**: Unique index trên bộ ba (parent_id, owner_department_id) với điều kiện parent_id IS NOT NULL AND deleted_at IS NULL để đảm bảo mỗi phòng ban chỉ nhận tối đa 1 Alias từ cùng một tài liệu gốc đang hoạt động.
+5.  **Chỉ mục tối ưu hóa Hibernate Filter (idx_doc_owner_dept & idx_doc_creator_dept)**: Index thường trên cột owner_department_id và creator_department_id để tăng tốc độ truy vấn lọc tự động chéo phòng ban.
 
-### 5.5. Định nghĩa Bộ lọc Tự động (Hibernate Filter)
-Hệ thống kích hoạt tự động bộ lọc `deptIsolationFilter` trên thực thể `Document` đối với mọi truy vấn JPA. Bộ lọc này tự động chèn thêm điều kiện logic dưới đây vào câu lệnh SQL được sinh ra:
+### 5.5. Định nghĩa Bộ lọc Tự động và Đánh giá Hiệu năng (Hibernate Filter)
+Hệ thống kích hoạt tự động bộ lọc `deptIsolationFilter` trên thực thể `Document` đối với mọi truy vấn JPA.
 *   **Logic Điều kiện:**
     `owner_department_id = :userDeptId OR creator_department_id = :userDeptId OR (parent_id IS NULL AND id IN (SELECT parent_id FROM documents WHERE owner_department_id = :userDeptId AND parent_id IS NOT NULL AND deleted_at IS NULL))`
+
+#### Đánh giá Hiệu năng (Performance Assessment)
+*   **Tác động Hiệu năng của điều kiện OR + IN (subquery)**: 
+    - Phép toán `OR` kết hợp với toán tử `IN` chứa câu truy vấn con tự liên kết (`self-referencing subquery`) là một thách thức đối với bộ tối ưu hóa truy vấn (Query Planner) của PostgreSQL khi kích thước dữ liệu tăng cao.
+    - Với điều kiện `OR`, Query Planner thường gặp khó khăn trong việc kết hợp hiệu quả nhiều chỉ mục khác nhau. Thay vì sử dụng Index Scan tốc độ cao, hệ thống có thể chuyển sang quét toàn bộ bảng (Seq Scan) hoặc sử dụng Bitmap Index Scan rồi kết hợp kết quả bằng BitmapOr.
+    - Toán tử `IN (subquery)` yêu cầu PostgreSQL thực hiện một câu truy vấn con để tìm tất cả các ID tài liệu gốc được Alias chia sẻ cho phòng ban hiện tại. Khi số lượng Alias tăng lên, chi phí thực thi truy vấn con này và so khớp đệ quy sẽ tăng tuyến tính. Tuy nhiên, đối với quy mô và yêu cầu hiện tại của hệ thống, cơ chế Hibernate Filter vẫn đáp ứng hoàn hảo và hoạt động ổn định.
 
 ---
 
@@ -501,60 +555,60 @@ Hệ thống kích hoạt tự động bộ lọc `deptIsolationFilter` trên th
 
 Mọi REST API phản hồi trong hệ thống đều sử dụng cấu trúc đóng gói dữ liệu thống nhất (Success Envelope / Error Envelope) và trả về các mã lỗi nghiệp vụ chuẩn hóa tại gói `common.error`.
 
-### 6.1. Danh sách các API Endpoints Nghiệp vụ
+### 6.1. API Endpoints
 
 #### 6.1.1. Tải lên tài liệu gốc (Upload Original Document)
 *   **URI**: `/api/v1/original-documents` | **Method**: `POST`
-*   **Quyền truy cập**: Người dùng có vai trò `ROLE_EMPLOYEE`, `ROLE_DEPT_MANAGER` hoặc `ROLE_BOARD`.
-*   **Dữ liệu gửi**: Tiêu đề (`title`), Tệp tin tải lên (`file`).
-*   **Lưu ý bảo mật**: `ownerDepartmentId` tự động trích xuất từ token xác thực, tuyệt đối không nhận tham số từ payload.
+*   **Quyền**: `ROLE_EMPLOYEE`, `ROLE_DEPT_MANAGER` hoặc `ROLE_BOARD`.
+*   **Lưu ý**: `ownerDepartmentId` tự động lấy từ JWT xác thực.
 
 #### 6.1.2. Danh sách tài liệu gốc (List Original Documents)
 *   **URI**: `/api/v1/original-documents` | **Method**: `GET`
-*   **Quyền truy cập**: Người dùng có vai trò `ROLE_EMPLOYEE`, `ROLE_DEPT_MANAGER` hoặc `ROLE_BOARD`.
-*   **Cơ chế xử lý**: Bộ lọc Hibernate Filter tự động giới hạn kết quả trả về, chỉ hiển thị tài liệu gốc thuộc sở hữu của phòng ban người dùng hiện tại (`parent_id IS NULL`).
+*   **Lọc dữ liệu**: Chỉ trả về các bản ghi tài liệu gốc thuộc bộ phận nội bộ của người dùng hiện tại (`owner_department_id = currentUser.departmentId` và `parent_id IS NULL`). Các tài liệu gốc của bộ phận khác sẽ không xuất hiện trong danh sách này.
 
 #### 6.1.3. Xem chi tiết tài liệu gốc (Get Original Document Detail)
 *   **URI**: `/api/v1/original-documents/{id}` | **Method**: `GET`
-*   **Quyền truy cập**: Người dùng nghiệp vụ thuộc phòng ban sở hữu hoặc phòng ban nhận Alias.
-*   **Kiểm soát quyền nghiêm ngặt**: Nếu người dùng thuộc phòng ban khác cố truy cập, hệ thống lập tức chặn bằng lỗi `ERR_DOCUMENT_NOT_FOUND` (404) để che giấu tài nguyên.
+*   **Kiểm soát quyền nghiêm ngặt**: Chỉ phòng ban sở hữu hoặc phòng ban nhận Alias đang hoạt động mới được gọi API. Mọi phòng ban khác cố truy cập sẽ nhận lỗi `ERR_DOCUMENT_NOT_FOUND` (404) để che giấu dữ liệu.
 
 #### 6.1.4. Xóa tài liệu gốc (Delete Original Document)
 *   **URI**: `/api/v1/original-documents/{id}` | **Method**: `DELETE`
-*   **Quyền truy cập**: Chỉ vai trò `ROLE_DEPT_MANAGER` (đối với phòng nghiệp vụ) hoặc `ROLE_BOARD` (đối với phòng BOARD) sở hữu tài liệu gốc tương ứng.
-*   **Lưu ý**: Chỉ thực hiện xóa mềm (soft delete), tự động lan truyền xóa mềm đến toàn bộ Alias liên quan.
+*   **Quyền**: Chỉ vai trò `ROLE_DEPT_MANAGER` (đối với phòng nghiệp vụ) hoặc `ROLE_BOARD` (đối với phòng BOARD) sở hữu tài liệu tương ứng. Thực hiện xóa mềm lan truyền.
 
 #### 6.1.5. Tạo liên kết chia sẻ Alias (Create Alias Document)
 *   **URI**: `/api/v1/alias-documents` | **Method**: `POST`
-*   **Quyền truy cập**: `ROLE_EMPLOYEE` / `ROLE_DEPT_MANAGER` của phòng sở hữu tài liệu gốc.
-*   **Request Payload**:
-    ```json
-    {
-      "title": "Tài liệu chia sẻ quy chế tài chính",
-      "original_document_id": "03b827e8-1111-4444-8888-000000000001",
-      "alias_department_id": "890f68bd-2222-3333-4444-555555555555"
-    }
-    ```
-*   **Lưu ý bảo mật**: Hệ thống nghiêm cấm tạo Alias cho tài liệu thuộc sở hữu của phòng ban khác (nếu vi phạm sẽ trả về lỗi `ERR_OWNERSHIP_VIOLATION` / 404 để bảo mật).
+*   **Quyền**: Chỉ `ROLE_EMPLOYEE` hoặc `ROLE_DEPT_MANAGER` thuộc phòng ban thực tế sở hữu tài liệu gốc (`owner_department_id == currentUser.departmentId`) mới được phép gọi. Nghiêm cấm tạo Alias cho tài liệu thuộc sở hữu của phòng ban khác.
 
 #### 6.1.6. Giải quyết Alias để xem tài liệu (Resolve Alias Document)
 *   **URI**: `/api/v1/alias-documents/{id}` | **Method**: `GET`
-*   **Quyền truy cập**: `ROLE_EMPLOYEE` / `ROLE_DEPT_MANAGER` thuộc phòng ban nhận Alias.
-*   **Kiểm soát quyền nghiêm ngặt**: Chỉ phòng ban nhận được chia sẻ Alias mới có quyền giải quyết Alias để xem/tải xuống tài liệu gốc liên kết. Bất kỳ tài khoản không thuộc phòng ban nhận Alias nào gọi API này đều bị chặn và trả về lỗi `ERR_DOCUMENT_NOT_FOUND` (404) để đảm bảo cô lập dữ liệu tuyệt đối.
+*   **Kiểm soát quyền nghiêm ngặt**: Chỉ người dùng thuộc phòng ban nhận Alias (`alias.ownerDepartmentId == currentUser.departmentId`) HOẶC phòng ban tạo Alias (`alias.creatorDepartmentId == currentUser.departmentId`) mới được quyền gọi API này để lấy thông tin tệp gốc. Phòng ban khác gọi API sẽ nhận lỗi `ERR_DOCUMENT_NOT_FOUND` (404).
 
-#### 5.1.7. Xóa liên kết Alias (Delete Alias Document)
+#### 6.1.7. Xóa liên kết Alias (Delete Alias Document)
 *   **URI**: `/api/v1/alias-documents/{id}` | **Method**: `DELETE`
-*   **Quyền truy cập**: `ROLE_DEPT_MANAGER` của phòng ban sở hữu tài liệu gốc (phòng ban tạo Alias).
-*   **Kiểm soát quyền nghiêm ngặt**: Chỉ phòng ban tạo Alias (phòng ban sở hữu tài liệu gốc) mới có quyền xóa mềm (thu hồi) Alias này. Phòng ban nhận Alias tuyệt đối không có quyền tự xóa Alias được chia sẻ sang phòng ban của mình (nếu cố tình gọi API sẽ nhận lỗi `ERR_OWNERSHIP_VIOLATION` / 404).
+*   **Quyền**: Chỉ `ROLE_DEPT_MANAGER` của phòng ban sở hữu tài liệu gốc (phòng tạo Alias) mới được xóa mềm Alias. Phòng ban nhận không được phép xóa (bị chặn và trả về lỗi `ERR_OWNERSHIP_VIOLATION` / 404).
 
-#### 6.1.8. Quản lý Người dùng (User Management - Admin)
+#### 6.1.8. Quản lý Người dùng và Phòng ban (Admin)
 *   `POST /api/v1/users` (Tạo tài khoản người dùng mới).
 *   `GET /api/v1/users` (Lấy danh sách người dùng).
-*   **Lưu ý bảo mật**: Vai trò và phòng ban được gán cố định khi tạo mới, hệ thống không cung cấp API cập nhật thông tin này sau khi đã tạo để tránh lỗ hổng leo thang đặc quyền.
-
-#### 6.1.9. Quản lý Phòng ban (Department Management - Admin)
 *   `POST /api/v1/departments` (Tạo phòng ban mới).
 *   `GET /api/v1/departments` (Lấy danh sách phòng ban).
+
+#### 6.1.9. Đăng nhập hệ thống (System Login)
+*   **URI**: `/api/v1/auth/login` | **Method**: `POST`
+*   **Quyền**: Không yêu cầu xác thực (Public Endpoint).
+*   **Cấu trúc Request Payload (Request DTO)**:
+    - username: Tên đăng nhập (ví dụ: employee_01)
+    - password: Mật khẩu (ví dụ: SecretPassword123)
+*   **Cấu trúc Response Payload (Success Response DTO)**:
+    - success: true
+    - code: SUCCESS
+    - timestamp: ISO-8601 UTC timestamp (ví dụ: 2026-06-26T16:30:00.000Z)
+    - data:
+        - accessToken: Chuỗi JWT Access Token (hiệu lực 15 phút)
+        - tokenType: Bearer
+        - expiresIn: 900 (giây)
+        - refreshToken: Chuỗi JWT Refresh Token (hiệu lực 7 ngày)
+        - refreshTokenExpiresIn: 604800 (giây)
+        - userInfo: Thông tin tài khoản đăng nhập (id, username, email, role, departmentId)
 
 ---
 
@@ -732,7 +786,6 @@ sequenceDiagram
     Repo->>DB: SELECT * FROM documents WHERE id = ? FOR UPDATE
     DB-->>Repo: Bản ghi tài liệu gốc
     Note over Service: Kiểm tra: originalDoc.ownerDepartmentId == currentUser.departmentId
-    Note over Service: Cập nhật alias.deletedAt = currentTimestamp
     Service->>Repo: save(alias)
     Repo->>DB: UPDATE documents SET deleted_at = ? WHERE id = ?
     DB-->>Repo: Thành công
@@ -742,11 +795,185 @@ sequenceDiagram
 
 ---
 
+### 7.8. Đăng nhập hệ thống (System Login)
+```mermaid
+sequenceDiagram
+    actor User as Người dùng nghiệp vụ
+    participant Controller as AuthController
+    participant Service as AuthService
+    participant Security as JwtTokenProvider
+    participant Repo as UserRepository
+    participant DB as PostgreSQL
+
+    User->>Controller: POST /api/v1/auth/login (username, password)
+    Controller->>Service: authenticate(dto.username, dto.password)
+    Service->>Repo: findByUsername(username)
+    Repo->>DB: SELECT * FROM users WHERE username = ?
+    DB-->>Repo: Thực thể User (hoặc Empty)
+    Note over Service: Nếu rỗng, throw ERR_UNAUTHENTICATED
+    Note over Service: So sánh BCrypt mật khẩu gửi lên<br/>với user.passwordHash
+    Note over Service: Nếu không khớp, throw ERR_UNAUTHENTICATED
+    Service->>Security: generateToken(user)
+    Security-->>Service: accessToken (JWT)
+    Service-->>Controller: DTO chứa accessToken & thông tin user
+    Controller-->>User: 200 OK (Success Response DTO)
+```
+
+---
+## 8. Thiết kế Tầng Truy cập Dữ liệu & Nghiệp vụ (Repository & Service Design)
+
+### 8.1. Thiết kế Lớp Tầng Service và Repository (Class Diagram)
+Sơ đồ lớp dưới đây mô tả mối quan hệ, các phương thức và kiểu dữ liệu trao đổi giữa các lớp:
+
+```mermaid
+classDiagram
+    class Department {
+        +UUID id
+        +String code
+        +String name
+    }
+    class User {
+        +UUID id
+        +String username
+        +String email
+        +String passwordHash
+        +Role role
+        +UUID departmentId
+    }
+    class Document {
+        +UUID id
+        +String businessCode
+        +String title
+        +String fileReference
+        +Long fileSize
+        +String hash
+        +UUID ownerDepartmentId
+        +UUID parentId
+        +UUID creatorDepartmentId
+        +UUID createdBy
+        +Timestamp createdAt
+        +Timestamp updatedAt
+        +Timestamp deletedAt
+        +isAlias() Boolean
+        +isOriginal() Boolean
+        +isOwnedBy(UUID deptId) Boolean
+    }
+    class Role {
+        <<enumeration>>
+        SYSTEM_ADMIN
+        ROLE_BOARD
+        ROLE_EMPLOYEE
+        ROLE_DEPT_MANAGER
+    }
+    
+    class DocumentController {
+        -DocumentService documentService
+        +uploadOriginalDocument(title, file) ApiResponse
+        +listOriginalDocuments(page, size) ApiResponse
+        +getOriginalDocumentDetail(id) ApiResponse
+        +deleteOriginalDocument(id) ApiResponse
+        +createAlias(CreateAliasRequest) ApiResponse
+        +resolveAlias(id) ApiResponse
+        +deleteAliasDocument(id) ApiResponse
+        +listReceivedAliases() ApiResponse
+        +listSharedAliases() ApiResponse
+    }
+    class UserController {
+        -UserService userService
+        +createUser(CreateUserRequest) ApiResponse
+        +listUsers() ApiResponse
+    }
+    class DepartmentController {
+        -DepartmentService departmentService
+        +createDepartment(CreateDepartmentRequest) ApiResponse
+        +listDepartments() ApiResponse
+    }
+    class DocumentService {
+        -DocumentRepository documentRepository
+        -ResourceOwnershipValidator validator
+        +uploadOriginalDocument(title, file, currentUser) Document
+        +listOriginalDocuments(page, size, currentUser) Page
+        +getOriginalDocumentDetail(id, currentUser) Document
+        +deleteOriginalDocument(id, currentUser) void
+        +createAlias(CreateAliasRequest, currentUser) Document
+        +resolveAlias(id, currentUser) Document
+        +deleteAliasDocument(id, currentUser) void
+    }
+    class UserService {
+        -UserRepository userRepository
+        -DepartmentRepository departmentRepository
+        +createUser(CreateUserRequest) User
+        +listUsers() List
+    }
+    class DepartmentService {
+        -DepartmentRepository departmentRepository
+        +createDepartment(CreateDepartmentRequest) Department
+        +listDepartments() List
+    }
+    class ResourceOwnershipValidator {
+        +validateAliasCreation(originalDoc, currentUser) void
+        +validateAliasResolution(aliasDoc, currentUser) void
+    }
+    class DocumentRepository {
+        <<interface>>
+        +save(Document) Document
+        +findById(UUID) Optional
+        +findByIdForUpdate(UUID) Optional
+        +existsByParentIdAndOwnerDepartmentIdAndDeletedAtIsNull(parentId, ownerDeptId) boolean
+        +resolveAlias(aliasId, userDeptId) Optional
+        +softDeleteAliasesByOriginalId(originalId, deletedAt) void
+    }
+    class UserRepository {
+        <<interface>>
+        +save(User) User
+        +findById(UUID) Optional
+        +existsByUsernameOrEmail(username, email) boolean
+    }
+    class DepartmentRepository {
+        <<interface>>
+        +save(Department) Department
+        +findById(UUID) Optional
+        +existsByCode(code) boolean
+    }
+    
+    User --> Role : has
+    User --> Department : belongs to
+    Document --> Department : owned by (ownerDepartmentId)
+    Document --> Department : created by department (creatorDepartmentId)
+    Document --> Document : references (parentId)
+    Document --> User : created by user (createdBy)
+    
+    DocumentController --> DocumentService
+    UserController --> UserService
+    DepartmentController --> DepartmentService
+    DocumentService --> DocumentRepository
+    DocumentService --> ResourceOwnershipValidator
+    UserService --> UserRepository
+    UserService --> DepartmentRepository
+    DepartmentService --> DepartmentRepository
+```
+
+### 8.2. Mô tả các Phương thức Nghiệp vụ và Khóa Dữ liệu
+
+#### `DocumentRepository`
+*   `findByIdForUpdate(id)`: Lấy bản ghi tài liệu gốc kèm theo cơ chế Khóa ghi bi quan (`PESSIMISTIC_WRITE`) để ngăn race condition.
+*   `existsByParentIdAndOwnerDepartmentIdAndDeletedAtIsNull(parentId, ownerDeptId)`: Kiểm tra sự tồn tại của Alias hoạt động để thực thi ràng buộc giới hạn 1 Alias hoạt động cho mỗi bộ phận nhận.
+*   `resolveAlias(aliasId, userDeptId)`: Thực hiện truy vấn liên kết lấy thông tin tệp tin gốc nếu phòng ban gửi yêu cầu trùng khớp với `ownerDepartmentId` của Alias.
+*   `softDeleteAliasesByOriginalId(originalId, deletedAt)`: Thực hiện cập nhật hàng loạt trạng thái xóa mềm cho toàn bộ Alias trỏ tới tài liệu gốc đã bị xóa.
+
+---
+
 ## 8. Quy tắc Xác thực Nghiệp vụ (Validation Rules)
 
 1.  **Ranh giới BOARD (BOARD Boundary Rule):** Hệ thống từ chối mọi yêu cầu tạo Alias đối với tài liệu gốc thuộc sở hữu của phòng ban `BOARD`. Thành viên phòng `BOARD` cũng bị cấm tạo hoặc nhận Alias chéo phòng ban dưới mọi hình thức.
 2.  **Xác thực Quyền sở hữu (Ownership Validation Rule):** Khi tạo Alias, hệ thống bắt buộc kiểm tra phòng ban của người dùng hiện tại phải trùng khớp với phòng ban sở hữu tài liệu gốc (`currentUser.departmentId == originalDocument.ownerDepartmentId`). Nếu không khớp, hệ thống ném ra ngoại lệ vi phạm quyền sở hữu.
-3.  **Cấm Alias nối tiếp (Anti-Chaining Rule):** Khóa chính UUID của tài liệu gốc được truyền vào để tạo Alias bắt buộc phải có bit cuối của LSB = `0` (là Original Document). Nếu bit cuối LSB = `1` (Alias Document), hệ thống lập tức từ chối vì đó là một Alias.
+3.  **Cấm Alias nối tiếp (Anti-Chaining Rule - Chống giả mạo tầng ứng dụng)**: Hệ thống nghiêm cấm tạo Alias trỏ tới một Alias khác.
+    *   *Bản chất nghiệp vụ (Business Rule)*: Đây là một quy tắc nghiệp vụ cốt lõi (Business Rule) được kiểm soát nghiêm ngặt trước khi tạo Alias. Một tài liệu liên kết (Alias) chỉ được phép trỏ trực tiếp đến tài liệu gốc (Original Document), không được phép tạo liên kết bắc cầu (Alias trỏ tới Alias) để tránh tạo ra các chuỗi liên kết mồ côi phức tạp và khó kiểm soát quyền truy cập.
+    *   *Ràng buộc thực thi nghiêm ngặt*: Quy tắc này không dựa vào bất kỳ trường phân loại nào do Client gửi lên trong request payload (để phòng tránh triệt để tấn công giả mạo tham số - Parameter Tampering). Khi nhận yêu cầu tạo Alias kèm ID tài liệu mục tiêu, tầng Service bắt buộc phải:
+        1. Truy vấn thực thể tài liệu từ CSDL dựa trên ID đáng tin cậy.
+        2. Kiểm tra thuộc tính `parentId` của thực thể vừa truy vấn từ CSDL. Nếu `parentId IS NOT NULL`, hệ thống từ chối ngay lập tức.
+        3. Kết hợp kiểm tra bit cuối LSB của UUID thực thể từ CSDL để đảm bảo LSB = `0` (Original).
+        Việc xác thực này được thực hiện hoàn toàn ở phía máy chủ bằng dữ liệu nghiệp vụ tin cậy được truy xuất trực tiếp từ CSDL, đảm bảo tính toàn vẹn tuyệt đối.
 4.  **Cấm tự chia sẻ (No Self-Sharing Rule):** Phòng ban nhận Alias phải khác với phòng ban sở hữu tài liệu gốc hiện tại.
 5.  **Giới hạn Định dạng File (File Whitelist Rule):** Chỉ chấp nhận các tệp tải lên có phần mở rộng và MIME type hợp lệ: `.pdf`, `.docx`, `.xlsx`, `.pptx`. Dung lượng tối đa được cấu hình cứng là **50MB**.
 6.  **Quy tắc Điều hướng Gọi thẳng Tối ưu hóa (Fast-Path Routing Rule):** Dựa trên đặc thù phân bổ tài nguyên của hệ thống (99% tài nguyên là tài liệu gốc, chỉ 1% là Alias), hệ thống tối ưu hóa luồng xử lý bằng cách kiểm tra nhanh bit cuối của ID tài liệu:
