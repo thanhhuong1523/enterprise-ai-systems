@@ -12,7 +12,7 @@ public enum ErrorCode {
     ERR_DUPLICATE_ALIAS(HttpStatus.BAD_REQUEST, "Phòng ban nhận đã nhận một liên kết đang hoạt động từ tài liệu này."),
     ERR_DOCUMENT_NOT_FOUND(HttpStatus.NOT_FOUND, "Tài liệu yêu cầu không tồn tại."),
     VALIDATION_ERROR(HttpStatus.BAD_REQUEST, "Dữ liệu không hợp lệ."),
-    ERR_SYSTEM_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "Lỗi hệ thống bất ngờ.");
+    ERR_SYSTEM_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "Lỗi hệ thống.");
 
     private final HttpStatus httpStatus;
     private final String defaultMessage;

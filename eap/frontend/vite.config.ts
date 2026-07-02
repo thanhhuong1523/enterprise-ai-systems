@@ -11,12 +11,18 @@ export default defineConfig({
     },
   },
   server: {
+    allowedHosts: ['vccintern.shares.zrok.io'],
+    hmr: {
+      host: 'vccintern.shares.zrok.io',
+      protocol: 'wss',
+      clientPort: 443
+    },
     proxy: {
       '/api': {
         target: 'http://localhost:8080',
         changeOrigin: true,
         secure: false,
-      },
+      }
     },
   },
 })
