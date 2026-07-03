@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useAuth } from '@/store/AuthContext';
+import { authService } from '@/services/api';
 import { useTheme } from '@/store/ThemeContext';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
@@ -47,7 +48,12 @@ export const DashboardLayout: React.FC = () => {
     });
   };
 
-  const executeLogout = () => {
+  const executeLogout = async () => {
+    try {
+      await authService.logout();
+    } catch (e) {
+      // ignore network errors
+    }
     queryClient.clear();
     logout();
     navigate('/login');

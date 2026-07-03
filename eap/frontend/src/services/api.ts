@@ -6,6 +6,10 @@ export const authService = {
     const response = await apiClient.post<ApiResponse<LoginResponse>>('/api/v1/auth/login', payload);
     return response.data;
   },
+  logout: async (): Promise<ApiResponse<void>> => {
+    const response = await apiClient.post<ApiResponse<void>>('/api/v1/auth/logout', {});
+    return response.data;
+  },
 };
 
 export const departmentService = {

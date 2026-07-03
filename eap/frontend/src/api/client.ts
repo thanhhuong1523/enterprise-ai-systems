@@ -63,19 +63,18 @@ apiClient.interceptors.response.use(
       originalRequest._retry = true;
       isRefreshing = true;
 
-      const refreshToken = localStorage.getItem('refreshToken');
-      if (refreshToken) {
+      const hasSession = !!localStorage.getItem('userInfo');
+      if (hasSession) {
         try {
           // Sử dụng instance axios sạch để tránh các interceptor khác can thiệp
           const response = await axios.post(
             `${API_BASE_URL}/api/v1/auth/refresh`,
-            { refreshToken },
+            {},
             { withCredentials: true }
           );
-          const { accessToken: newAccessToken, refreshToken: newRefreshToken } = response.data.data;
+          const { accessToken: newAccessToken } = response.data.data;
 
           localStorage.setItem('accessToken', newAccessToken);
-          localStorage.setItem('refreshToken', newRefreshToken);
 
           apiClient.defaults.headers.common['Authorization'] = `Bearer ${newAccessToken}`;
           originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
@@ -89,7 +88,6 @@ apiClient.interceptors.response.use(
           isRefreshing = false;
 
           localStorage.removeItem('accessToken');
-          localStorage.removeItem('refreshToken');
           localStorage.removeItem('userInfo');
 
           window.location.href = '/login';
@@ -97,7 +95,6 @@ apiClient.interceptors.response.use(
         }
       } else {
         localStorage.removeItem('accessToken');
-        localStorage.removeItem('refreshToken');
         localStorage.removeItem('userInfo');
         window.location.href = '/login';
       }
