@@ -2,6 +2,7 @@ package com.vccorp.eap.controller;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.vccorp.eap.dto.CreateAliasRequest;
+import com.vccorp.eap.dto.DocumentResponse;
 import com.vccorp.eap.enums.Role;
 import com.vccorp.eap.infrastructure.security.JwtAuthenticationFilter;
 import com.vccorp.eap.service.JwtService;
@@ -70,7 +71,7 @@ public class DocumentControllerTest {
         UUID targetDeptId = UUID.randomUUID();
         CreateAliasRequest request = new CreateAliasRequest(origId, targetDeptId);
 
-        Document aliasDoc = Document.builder()
+        DocumentResponse aliasDoc = DocumentResponse.builder()
                 .id(UUID.randomUUID())
                 .businessCode("ALIA_123456")
                 .title("Mock Alias")

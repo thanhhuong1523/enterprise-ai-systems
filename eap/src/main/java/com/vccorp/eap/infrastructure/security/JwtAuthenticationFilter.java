@@ -27,6 +27,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private final JwtService jwtService;
     private final com.vccorp.eap.repository.UserRepository userRepository;
+    private final com.vccorp.eap.service.RedisService redisService;
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
@@ -40,7 +41,25 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             if (idStr != null) {
                 try {
                     UUID userId = UUID.fromString(idStr);
-                    if (!userRepository.existsById(userId)) {
+                    String cacheKey = "user_exists:" + userId;
+                    boolean exists = false;
+                    String cachedValue = null;
+                    try {
+                        cachedValue = redisService.get(cacheKey);
+                    } catch (Exception e) {
+                        // Suppress Redis connectivity issues
+                    }
+                    if (cachedValue != null) {
+                        exists = Boolean.parseBoolean(cachedValue);
+                    } else {
+                        exists = userRepository.existsById(userId);
+                        try {
+                            redisService.set(cacheKey, String.valueOf(exists), 300000); // 5 mins
+                        } catch (Exception e) {
+                            // Suppress Redis write issues
+                        }
+                    }
+                    if (!exists) {
                         filterChain.doFilter(request, response);
                         return;
                     }

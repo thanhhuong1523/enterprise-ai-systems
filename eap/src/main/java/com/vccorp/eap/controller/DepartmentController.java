@@ -2,8 +2,8 @@ package com.vccorp.eap.controller;
 
 import com.vccorp.eap.common.response.ApiResponse;
 import com.vccorp.eap.dto.CreateDepartmentRequest;
+import com.vccorp.eap.dto.DepartmentResponse;
 import com.vccorp.eap.dto.UpdateDepartmentRequest;
-import com.vccorp.eap.model.Department;
 import com.vccorp.eap.service.DepartmentService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -22,28 +22,28 @@ public class DepartmentController {
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    public ApiResponse<Department> createDepartment(@Valid @RequestBody CreateDepartmentRequest request) {
-        Department department = departmentService.createDepartment(request);
+    public ApiResponse<DepartmentResponse> createDepartment(@Valid @RequestBody CreateDepartmentRequest request) {
+        DepartmentResponse department = departmentService.createDepartment(request);
         return ApiResponse.success(department);
     }
 
     @GetMapping
-    public ApiResponse<List<Department>> listDepartments() {
-        List<Department> departments = departmentService.listDepartments();
+    public ApiResponse<List<DepartmentResponse>> listDepartments() {
+        List<DepartmentResponse> departments = departmentService.listDepartments();
         return ApiResponse.success(departments);
     }
 
     @GetMapping("/{id}")
-    public ApiResponse<Department> getDepartmentDetail(@PathVariable("id") UUID id) {
-        Department department = departmentService.getDepartmentDetail(id);
+    public ApiResponse<DepartmentResponse> getDepartmentDetail(@PathVariable("id") UUID id) {
+        DepartmentResponse department = departmentService.getDepartmentDetail(id);
         return ApiResponse.success(department);
     }
 
     @PutMapping("/{id}")
-    public ApiResponse<Department> updateDepartment(
+    public ApiResponse<DepartmentResponse> updateDepartment(
             @PathVariable("id") UUID id,
             @Valid @RequestBody UpdateDepartmentRequest request) {
-        Department department = departmentService.updateDepartment(id, request);
+        DepartmentResponse department = departmentService.updateDepartment(id, request);
         return ApiResponse.success(department);
     }
 

@@ -3,6 +3,7 @@ package com.vccorp.eap.service;
 import com.vccorp.eap.common.error.ErrorCode;
 import com.vccorp.eap.common.exception.BusinessException;
 import com.vccorp.eap.dto.CreateAliasRequest;
+import com.vccorp.eap.dto.DocumentResponse;
 import com.vccorp.eap.enums.Role;
 import com.vccorp.eap.model.Department;
 import com.vccorp.eap.model.Document;
@@ -30,6 +31,9 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
+import com.vccorp.eap.service.StorageService;
+import com.vccorp.eap.service.impl.DocumentServiceImpl;
+
 @ExtendWith(MockitoExtension.class)
 public class DocumentServiceTest {
 
@@ -39,8 +43,11 @@ public class DocumentServiceTest {
     @Mock
     private DepartmentRepository departmentRepository;
 
+    @Mock
+    private StorageService storageService;
+
     @InjectMocks
-    private DocumentService documentService;
+    private DocumentServiceImpl documentService;
 
     @TempDir
     File tempDir;
@@ -66,17 +73,18 @@ public class DocumentServiceTest {
                 .role(Role.ROLE_DEPT_MANAGER)
                 .departmentId(deptId)
                 .build();
-        ReflectionTestUtils.setField(documentService, "uploadDir", tempDir.getAbsolutePath());
     }
 
     @Test
     void uploadOriginalDocument_Success() throws IOException {
         MockMultipartFile file = new MockMultipartFile(
-                "file", "test.pdf", "application/pdf", "dummy content".getBytes()
+                "file", "test.pdf", "application/pdf", "%PDF-1.4 mock pdf content".getBytes()
         );
+        when(storageService.storeFile(any(), anyString())).thenReturn("mock/file/path");
+        when(storageService.loadFile(anyString())).thenReturn("dummy content".getBytes());
         when(documentRepository.save(any(Document.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-        Document savedDoc = documentService.uploadOriginalDocument("Test Doc", file, employeeUser);
+        DocumentResponse savedDoc = documentService.uploadOriginalDocument("Test Doc", file, employeeUser);
 
         assertNotNull(savedDoc);
         assertTrue(savedDoc.isOriginal());
@@ -84,7 +92,6 @@ public class DocumentServiceTest {
         assertEquals("Test Doc", savedDoc.getTitle());
         assertEquals(deptId, savedDoc.getOwnerDepartmentId());
         assertTrue(savedDoc.getBusinessCode().startsWith("ORIG_"));
-        assertNotNull(savedDoc.getFileReference());
         assertNotNull(savedDoc.getHash());
     }
 
@@ -133,7 +140,7 @@ public class DocumentServiceTest {
         when(documentRepository.save(any(Document.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
 
-        Document alias =
+        DocumentResponse alias =
                 documentService.createAlias(request, managerUser);
 
         assertNotNull(alias);
@@ -151,7 +158,6 @@ public class DocumentServiceTest {
 
         assertTrue(alias.getBusinessCode().startsWith("ALIA_"));
 
-        assertNull(alias.getFileReference());
         assertNull(alias.getFileSize());
         assertNull(alias.getHash());
     }

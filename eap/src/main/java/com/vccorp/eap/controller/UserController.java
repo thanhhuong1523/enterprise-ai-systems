@@ -3,7 +3,7 @@ package com.vccorp.eap.controller;
 import com.vccorp.eap.common.response.ApiResponse;
 import com.vccorp.eap.dto.CreateUserRequest;
 import com.vccorp.eap.dto.UpdateUserRequest;
-import com.vccorp.eap.model.User;
+import com.vccorp.eap.dto.UserResponse;
 import com.vccorp.eap.service.UserService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -22,28 +22,28 @@ public class UserController {
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    public ApiResponse<User> createUser(@Valid @RequestBody CreateUserRequest request) {
-        User user = userService.createUser(request);
+    public ApiResponse<UserResponse> createUser(@Valid @RequestBody CreateUserRequest request) {
+        UserResponse user = userService.createUser(request);
         return ApiResponse.success(user);
     }
 
     @GetMapping
-    public ApiResponse<List<User>> listUsers() {
-        List<User> users = userService.listUsers();
+    public ApiResponse<List<UserResponse>> listUsers() {
+        List<UserResponse> users = userService.listUsers();
         return ApiResponse.success(users);
     }
 
     @GetMapping("/{id}")
-    public ApiResponse<User> getUserDetail(@PathVariable("id") UUID id) {
-        User user = userService.getUserDetail(id);
+    public ApiResponse<UserResponse> getUserDetail(@PathVariable("id") UUID id) {
+        UserResponse user = userService.getUserDetail(id);
         return ApiResponse.success(user);
     }
 
     @PutMapping("/{id}")
-    public ApiResponse<User> updateUser(
+    public ApiResponse<UserResponse> updateUser(
             @PathVariable("id") UUID id,
             @Valid @RequestBody UpdateUserRequest request) {
-        User user = userService.updateUser(id, request);
+        UserResponse user = userService.updateUser(id, request);
         return ApiResponse.success(user);
     }
 

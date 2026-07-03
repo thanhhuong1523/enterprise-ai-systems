@@ -22,6 +22,8 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
+import com.vccorp.eap.service.impl.AuthServiceImpl;
+
 @ExtendWith(MockitoExtension.class)
 public class AuthServiceTest {
 
@@ -38,7 +40,7 @@ public class AuthServiceTest {
     private RefreshTokenService refreshTokenService;
 
     @InjectMocks
-    private AuthService authService;
+    private AuthServiceImpl authService;
 
     private User sampleUser;
 

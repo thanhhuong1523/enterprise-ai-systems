@@ -7,6 +7,7 @@ export const apiClient = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
+  withCredentials: true,
 });
 
 apiClient.interceptors.request.use(
@@ -66,7 +67,11 @@ apiClient.interceptors.response.use(
       if (refreshToken) {
         try {
           // Sử dụng instance axios sạch để tránh các interceptor khác can thiệp
-          const response = await axios.post(`${API_BASE_URL}/api/v1/auth/refresh`, { refreshToken });
+          const response = await axios.post(
+            `${API_BASE_URL}/api/v1/auth/refresh`,
+            { refreshToken },
+            { withCredentials: true }
+          );
           const { accessToken: newAccessToken, refreshToken: newRefreshToken } = response.data.data;
 
           localStorage.setItem('accessToken', newAccessToken);

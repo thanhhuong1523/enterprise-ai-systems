@@ -38,6 +38,9 @@ public class SecurityConfigTest {
     @MockBean
     private UserService userService;
 
+    @MockBean
+    private com.vccorp.eap.service.RedisService redisService;
+
     @Test
     public void requestWithoutToken_Returns401() throws Exception {
         mockMvc.perform(get("/api/v1/users"))

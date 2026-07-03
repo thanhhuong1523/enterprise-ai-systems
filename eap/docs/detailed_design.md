@@ -355,130 +355,135 @@ Sơ đồ thể hiện toàn bộ các lớp thiết kế trong hệ thống bao
 
 ```mermaid
 classDiagram
-    class Department {
-        +UUID id
-        +String code
-        +String name
-    }
-    class User {
+    class UserResponse {
         +UUID id
         +String username
         +String email
-        +String passwordHash
         +Role role
         +UUID departmentId
+        +String fullName
+        +String phone
+        +LocalDateTime createdAt
+        +LocalDateTime updatedAt
     }
-    class Document {
+    class DepartmentResponse {
+        +UUID id
+        +String code
+        +String name
+        +String description
+        +LocalDateTime createdAt
+        +LocalDateTime updatedAt
+    }
+    class DocumentResponse {
         +UUID id
         +String businessCode
         +String title
-        +String fileReference
         +Long fileSize
         +String hash
         +UUID ownerDepartmentId
         +UUID parentId
         +UUID creatorDepartmentId
         +UUID createdBy
-        +Timestamp createdAt
-        +Timestamp updatedAt
-        +Timestamp deletedAt
-        +isAlias() Boolean
-        +isOriginal() Boolean
-        +isOwnedBy(UUID deptId) Boolean
+        +LocalDateTime createdAt
+        +LocalDateTime updatedAt
+        +isAlias() boolean
+        +isOriginal() boolean
     }
-    class Role {
-        <<enumeration>>
-        SYSTEM_ADMIN
-        ROLE_BOARD
-        ROLE_EMPLOYEE
-        ROLE_DEPT_MANAGER
+
+    class UserService {
+        <<interface>>
+        +createUser(CreateUserRequest) UserResponse
+        +listUsers() List~UserResponse~
+        +getUserDetail(UUID) UserResponse
+        +updateUser(UUID, UpdateUserRequest) UserResponse
+        +deleteUser(UUID) void
     }
-    
+    class UserServiceImpl {
+        -UserRepository userRepository
+        -DepartmentRepository departmentRepository
+        -PasswordEncoder passwordEncoder
+        -RedisService redisService
+    }
+    UserService <|.. UserServiceImpl
+
+    class DepartmentService {
+        <<interface>>
+        +createDepartment(CreateDepartmentRequest) DepartmentResponse
+        +listDepartments() List~DepartmentResponse~
+        +getDepartmentDetail(UUID) DepartmentResponse
+        +updateDepartment(UUID, UpdateDepartmentRequest) DepartmentResponse
+        +deleteDepartment(UUID) void
+    }
+    class DepartmentServiceImpl {
+        -DepartmentRepository departmentRepository
+        -UserRepository userRepository
+        -DocumentRepository documentRepository
+    }
+    DepartmentService <|.. DepartmentServiceImpl
+
+    class DocumentService {
+        <<interface>>
+        +uploadOriginalDocument(String, MultipartFile, User) DocumentResponse
+        +listOriginalDocuments(int, int, User) Page~DocumentResponse~
+        +listSharedDocuments(int, int, User) Page~DocumentResponse~
+        +getOriginalDocumentDetail(UUID, User) DocumentResponse
+        +listDocumentAliases(UUID, User) List~DocumentResponse~
+        +updateOriginalDocument(UUID, String, User) DocumentResponse
+        +deleteOriginalDocument(UUID, User) void
+        +createAlias(CreateAliasRequest, User) DocumentResponse
+        +deleteAlias(UUID, User) void
+        +resolveAlias(UUID, User) byte[]
+    }
+    class DocumentServiceImpl {
+        -DocumentRepository documentRepository
+        -DepartmentRepository departmentRepository
+        -StorageService storageService
+    }
+    DocumentService <|.. DocumentServiceImpl
+
+    class StorageService {
+        <<interface>>
+        +storeFile(MultipartFile, String) String
+        +loadFile(String) byte[]
+    }
+    class FileStorageServiceImpl {
+        -String uploadDir
+    }
+    StorageService <|.. FileStorageServiceImpl
+
+    class AuthService {
+        <<interface>>
+        +login(LoginRequest) LoginResponse
+        +login(LoginRequest, String, String) LoginResponse
+        +refresh(String, String, String) LoginResponse
+        +logout(String) void
+    }
+    class AuthServiceImpl {
+        -UserRepository userRepository
+        -PasswordEncoder passwordEncoder
+        -JwtService jwtService
+        -RefreshTokenService refreshTokenService
+    }
+    AuthService <|.. AuthServiceImpl
+
     class DocumentController {
         -DocumentService documentService
-        +uploadOriginalDocument(title, file) ApiResponse
-        +listOriginalDocuments(page, size) ApiResponse
-        +getOriginalDocumentDetail(id) ApiResponse
-        +deleteOriginalDocument(id) ApiResponse
-        +createAlias(CreateAliasRequest) ApiResponse
-        +resolveAlias(id) ApiResponse
-        +deleteAliasDocument(id) ApiResponse
-        +listReceivedAliases() ApiResponse
-        +listSharedAliases() ApiResponse
     }
     class UserController {
         -UserService userService
-        +createUser(CreateUserRequest) ApiResponse
-        +listUsers() ApiResponse
     }
     class DepartmentController {
         -DepartmentService departmentService
-        +createDepartment(CreateDepartmentRequest) ApiResponse
-        +listDepartments() ApiResponse
     }
-    class DocumentService {
-        -DocumentRepository documentRepository
-        -ResourceOwnershipValidator validator
-        +uploadOriginalDocument(title, file, currentUser) Document
-        +listOriginalDocuments(page, size, currentUser) Page
-        +getOriginalDocumentDetail(id, currentUser) Document
-        +deleteOriginalDocument(id, currentUser) void
-        +createAlias(CreateAliasRequest, currentUser) Document
-        +resolveAlias(id, currentUser) Document
-        +deleteAliasDocument(id, currentUser) void
+    class AuthController {
+        -AuthService authService
     }
-    class UserService {
-        -UserRepository userRepository
-        -DepartmentRepository departmentRepository
-        +createUser(CreateUserRequest) User
-        +listUsers() List
-    }
-    class DepartmentService {
-        -DepartmentRepository departmentRepository
-        +createDepartment(CreateDepartmentRequest) Department
-        +listDepartments() List
-    }
-    class ResourceOwnershipValidator {
-        +validateAliasCreation(originalDoc, currentUser) void
-        +validateAliasResolution(aliasDoc, currentUser) void
-    }
-    class DocumentRepository {
-        <<interface>>
-        +save(Document) Document
-        +findById(UUID) Optional
-        +findByIdForUpdate(UUID) Optional
-        +existsByParentIdAndOwnerDepartmentIdAndDeletedAtIsNull(parentId, ownerDeptId) boolean
-        +resolveAlias(aliasId, userDeptId) Optional
-        +softDeleteAliasesByOriginalId(originalId, deletedAt) void
-    }
-    class UserRepository {
-        <<interface>>
-        +save(User) User
-        +findById(UUID) Optional
-        +existsByUsernameOrEmail(username, email) boolean
-    }
-    class DepartmentRepository {
-        <<interface>>
-        +save(Department) Department
-        +findById(UUID) Optional
-        +existsByCode(code) boolean
-    }
-    
-    User --> Role : has
-    User --> Department : belongs to
-    Document --> Department : owned by (ownerDepartmentId)
-    Document --> Department : created by department (creatorDepartmentId)
-    Document --> Document : references (parentId)
-    Document --> User : created by user (createdBy)
-    
+
     DocumentController --> DocumentService
     UserController --> UserService
     DepartmentController --> DepartmentService
-    DocumentService --> DocumentRepository
-    DocumentService --> ResourceOwnershipValidator
-    UserService --> UserRepository
-    UserService --> DepartmentRepository
-    DepartmentService --> DepartmentRepository
+    AuthController --> AuthService
+    DocumentServiceImpl --> StorageService
 ```
 
 ---
@@ -827,130 +832,135 @@ Sơ đồ lớp dưới đây mô tả mối quan hệ, các phương thức và
 
 ```mermaid
 classDiagram
-    class Department {
-        +UUID id
-        +String code
-        +String name
-    }
-    class User {
+    class UserResponse {
         +UUID id
         +String username
         +String email
-        +String passwordHash
         +Role role
         +UUID departmentId
+        +String fullName
+        +String phone
+        +LocalDateTime createdAt
+        +LocalDateTime updatedAt
     }
-    class Document {
+    class DepartmentResponse {
+        +UUID id
+        +String code
+        +String name
+        +String description
+        +LocalDateTime createdAt
+        +LocalDateTime updatedAt
+    }
+    class DocumentResponse {
         +UUID id
         +String businessCode
         +String title
-        +String fileReference
         +Long fileSize
         +String hash
         +UUID ownerDepartmentId
         +UUID parentId
         +UUID creatorDepartmentId
         +UUID createdBy
-        +Timestamp createdAt
-        +Timestamp updatedAt
-        +Timestamp deletedAt
-        +isAlias() Boolean
-        +isOriginal() Boolean
-        +isOwnedBy(UUID deptId) Boolean
+        +LocalDateTime createdAt
+        +LocalDateTime updatedAt
+        +isAlias() boolean
+        +isOriginal() boolean
     }
-    class Role {
-        <<enumeration>>
-        SYSTEM_ADMIN
-        ROLE_BOARD
-        ROLE_EMPLOYEE
-        ROLE_DEPT_MANAGER
+
+    class UserService {
+        <<interface>>
+        +createUser(CreateUserRequest) UserResponse
+        +listUsers() List~UserResponse~
+        +getUserDetail(UUID) UserResponse
+        +updateUser(UUID, UpdateUserRequest) UserResponse
+        +deleteUser(UUID) void
     }
-    
+    class UserServiceImpl {
+        -UserRepository userRepository
+        -DepartmentRepository departmentRepository
+        -PasswordEncoder passwordEncoder
+        -RedisService redisService
+    }
+    UserService <|.. UserServiceImpl
+
+    class DepartmentService {
+        <<interface>>
+        +createDepartment(CreateDepartmentRequest) DepartmentResponse
+        +listDepartments() List~DepartmentResponse~
+        +getDepartmentDetail(UUID) DepartmentResponse
+        +updateDepartment(UUID, UpdateDepartmentRequest) DepartmentResponse
+        +deleteDepartment(UUID) void
+    }
+    class DepartmentServiceImpl {
+        -DepartmentRepository departmentRepository
+        -UserRepository userRepository
+        -DocumentRepository documentRepository
+    }
+    DepartmentService <|.. DepartmentServiceImpl
+
+    class DocumentService {
+        <<interface>>
+        +uploadOriginalDocument(String, MultipartFile, User) DocumentResponse
+        +listOriginalDocuments(int, int, User) Page~DocumentResponse~
+        +listSharedDocuments(int, int, User) Page~DocumentResponse~
+        +getOriginalDocumentDetail(UUID, User) DocumentResponse
+        +listDocumentAliases(UUID, User) List~DocumentResponse~
+        +updateOriginalDocument(UUID, String, User) DocumentResponse
+        +deleteOriginalDocument(UUID, User) void
+        +createAlias(CreateAliasRequest, User) DocumentResponse
+        +deleteAlias(UUID, User) void
+        +resolveAlias(UUID, User) byte[]
+    }
+    class DocumentServiceImpl {
+        -DocumentRepository documentRepository
+        -DepartmentRepository departmentRepository
+        -StorageService storageService
+    }
+    DocumentService <|.. DocumentServiceImpl
+
+    class StorageService {
+        <<interface>>
+        +storeFile(MultipartFile, String) String
+        +loadFile(String) byte[]
+    }
+    class FileStorageServiceImpl {
+        -String uploadDir
+    }
+    StorageService <|.. FileStorageServiceImpl
+
+    class AuthService {
+        <<interface>>
+        +login(LoginRequest) LoginResponse
+        +login(LoginRequest, String, String) LoginResponse
+        +refresh(String, String, String) LoginResponse
+        +logout(String) void
+    }
+    class AuthServiceImpl {
+        -UserRepository userRepository
+        -PasswordEncoder passwordEncoder
+        -JwtService jwtService
+        -RefreshTokenService refreshTokenService
+    }
+    AuthService <|.. AuthServiceImpl
+
     class DocumentController {
         -DocumentService documentService
-        +uploadOriginalDocument(title, file) ApiResponse
-        +listOriginalDocuments(page, size) ApiResponse
-        +getOriginalDocumentDetail(id) ApiResponse
-        +deleteOriginalDocument(id) ApiResponse
-        +createAlias(CreateAliasRequest) ApiResponse
-        +resolveAlias(id) ApiResponse
-        +deleteAliasDocument(id) ApiResponse
-        +listReceivedAliases() ApiResponse
-        +listSharedAliases() ApiResponse
     }
     class UserController {
         -UserService userService
-        +createUser(CreateUserRequest) ApiResponse
-        +listUsers() ApiResponse
     }
     class DepartmentController {
         -DepartmentService departmentService
-        +createDepartment(CreateDepartmentRequest) ApiResponse
-        +listDepartments() ApiResponse
     }
-    class DocumentService {
-        -DocumentRepository documentRepository
-        -ResourceOwnershipValidator validator
-        +uploadOriginalDocument(title, file, currentUser) Document
-        +listOriginalDocuments(page, size, currentUser) Page
-        +getOriginalDocumentDetail(id, currentUser) Document
-        +deleteOriginalDocument(id, currentUser) void
-        +createAlias(CreateAliasRequest, currentUser) Document
-        +resolveAlias(id, currentUser) Document
-        +deleteAliasDocument(id, currentUser) void
+    class AuthController {
+        -AuthService authService
     }
-    class UserService {
-        -UserRepository userRepository
-        -DepartmentRepository departmentRepository
-        +createUser(CreateUserRequest) User
-        +listUsers() List
-    }
-    class DepartmentService {
-        -DepartmentRepository departmentRepository
-        +createDepartment(CreateDepartmentRequest) Department
-        +listDepartments() List
-    }
-    class ResourceOwnershipValidator {
-        +validateAliasCreation(originalDoc, currentUser) void
-        +validateAliasResolution(aliasDoc, currentUser) void
-    }
-    class DocumentRepository {
-        <<interface>>
-        +save(Document) Document
-        +findById(UUID) Optional
-        +findByIdForUpdate(UUID) Optional
-        +existsByParentIdAndOwnerDepartmentIdAndDeletedAtIsNull(parentId, ownerDeptId) boolean
-        +resolveAlias(aliasId, userDeptId) Optional
-        +softDeleteAliasesByOriginalId(originalId, deletedAt) void
-    }
-    class UserRepository {
-        <<interface>>
-        +save(User) User
-        +findById(UUID) Optional
-        +existsByUsernameOrEmail(username, email) boolean
-    }
-    class DepartmentRepository {
-        <<interface>>
-        +save(Department) Department
-        +findById(UUID) Optional
-        +existsByCode(code) boolean
-    }
-    
-    User --> Role : has
-    User --> Department : belongs to
-    Document --> Department : owned by (ownerDepartmentId)
-    Document --> Department : created by department (creatorDepartmentId)
-    Document --> Document : references (parentId)
-    Document --> User : created by user (createdBy)
-    
+
     DocumentController --> DocumentService
     UserController --> UserService
     DepartmentController --> DepartmentService
-    DocumentService --> DocumentRepository
-    DocumentService --> ResourceOwnershipValidator
-    UserService --> UserRepository
-    UserService --> DepartmentRepository
-    DepartmentService --> DepartmentRepository
+    AuthController --> AuthService
+    DocumentServiceImpl --> StorageService
 ```
 
 ### 8.2. Mô tả các Phương thức Nghiệp vụ và Khóa Dữ liệu
@@ -979,6 +989,7 @@ classDiagram
 6.  **Quy tắc Điều hướng Gọi thẳng Tối ưu hóa (Fast-Path Routing Rule):** Dựa trên đặc thù phân bổ tài nguyên của hệ thống (99% tài nguyên là tài liệu gốc, chỉ 1% là Alias), hệ thống tối ưu hóa luồng xử lý bằng cách kiểm tra nhanh bit cuối của ID tài liệu:
     - Nếu bit cuối (LSB) = `0` (Original - chiếm 99% trường hợp): Điều hướng và gọi trực tiếp vào bộ xử lý tài liệu gốc chuyên biệt (`OriginalDocumentProcessor`) mà không chạy qua các logic phân giải Alias hay kiểm tra DB chéo phòng ban.
     - Nếu bit cuối (LSB) = `1` (Alias - chiếm 1% trường hợp): Điều hướng và gọi trực tiếp vào bộ xử lý phân giải liên kết (`AliasDocumentProcessor`).
+7.  **Cấm xóa SYSTEM_ADMIN (System Admin Deletion Restriction):** Hệ thống chặn hoàn toàn mọi yêu cầu xóa tài khoản có vai trò `SYSTEM_ADMIN` để đảm bảo tính sẵn sàng và tính vẹn toàn tối cao của việc quản trị hệ thống.
 
 ---
 

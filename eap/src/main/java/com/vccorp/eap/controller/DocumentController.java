@@ -2,8 +2,8 @@ package com.vccorp.eap.controller;
 
 import com.vccorp.eap.common.response.ApiResponse;
 import com.vccorp.eap.dto.CreateAliasRequest;
+import com.vccorp.eap.dto.DocumentResponse;
 import com.vccorp.eap.infrastructure.security.SecurityContextHelper;
-import com.vccorp.eap.model.Document;
 import com.vccorp.eap.model.User;
 import com.vccorp.eap.service.DocumentService;
 import jakarta.validation.Valid;
@@ -25,39 +25,37 @@ import java.util.UUID;
 public class DocumentController {
 
     private final DocumentService documentService;
-    
-    // ... skipping other endpoints for brevity
-    
+
     @PostMapping(value = "/original-documents", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @ResponseStatus(HttpStatus.CREATED)
-    public ApiResponse<Document> uploadOriginalDocument(
+    public ApiResponse<DocumentResponse> uploadOriginalDocument(
             @RequestParam("title") String title,
             @RequestParam("file") MultipartFile file) {
         User currentUser = SecurityContextHelper.getCurrentUser();
-        Document document = documentService.uploadOriginalDocument(title, file, currentUser);
+        DocumentResponse document = documentService.uploadOriginalDocument(title, file, currentUser);
         return ApiResponse.success(document);
     }
 
     @GetMapping("/original-documents")
-    public ApiResponse<Page<Document>> listOriginalDocuments(
+    public ApiResponse<Page<DocumentResponse>> listOriginalDocuments(
             @RequestParam(value = "page", defaultValue = "0") int page,
             @RequestParam(value = "size", defaultValue = "10") int size) {
         User currentUser = SecurityContextHelper.getCurrentUser();
-        Page<Document> documents = documentService.listOriginalDocuments(page, size, currentUser);
+        Page<DocumentResponse> documents = documentService.listOriginalDocuments(page, size, currentUser);
         return ApiResponse.success(documents);
     }
 
     @GetMapping("/original-documents/{id}")
-    public ApiResponse<Document> getOriginalDocumentDetail(@PathVariable("id") UUID id) {
+    public ApiResponse<DocumentResponse> getOriginalDocumentDetail(@PathVariable("id") UUID id) {
         User currentUser = SecurityContextHelper.getCurrentUser();
-        Document document = documentService.getOriginalDocumentDetail(id, currentUser);
+        DocumentResponse document = documentService.getOriginalDocumentDetail(id, currentUser);
         return ApiResponse.success(document);
     }
 
     @GetMapping("/original-documents/{id}/aliases")
-    public ApiResponse<List<Document>> listDocumentAliases(@PathVariable("id") UUID id) {
+    public ApiResponse<List<DocumentResponse>> listDocumentAliases(@PathVariable("id") UUID id) {
         User currentUser = SecurityContextHelper.getCurrentUser();
-        List<Document> aliases = documentService.listDocumentAliases(id, currentUser);
+        List<DocumentResponse> aliases = documentService.listDocumentAliases(id, currentUser);
         return ApiResponse.success(aliases);
     }
 
@@ -69,28 +67,28 @@ public class DocumentController {
     }
 
     @PutMapping("/original-documents/{id}")
-    public ApiResponse<Document> updateOriginalDocument(
+    public ApiResponse<DocumentResponse> updateOriginalDocument(
             @PathVariable("id") UUID id,
             @Valid @RequestBody com.vccorp.eap.dto.UpdateDocumentRequest request) {
         User currentUser = SecurityContextHelper.getCurrentUser();
-        Document document = documentService.updateOriginalDocument(id, request.getTitle(), currentUser);
+        DocumentResponse document = documentService.updateOriginalDocument(id, request.getTitle(), currentUser);
         return ApiResponse.success(document);
     }
 
     @PostMapping("/alias-documents")
     @ResponseStatus(HttpStatus.CREATED)
-    public ApiResponse<Document> createAlias(@Valid @RequestBody CreateAliasRequest request) {
+    public ApiResponse<DocumentResponse> createAlias(@Valid @RequestBody CreateAliasRequest request) {
         User currentUser = SecurityContextHelper.getCurrentUser();
-        Document alias = documentService.createAlias(request, currentUser);
+        DocumentResponse alias = documentService.createAlias(request, currentUser);
         return ApiResponse.success(alias);
     }
 
     @GetMapping("/alias-documents")
-    public ApiResponse<Page<Document>> listSharedDocuments(
+    public ApiResponse<Page<DocumentResponse>> listSharedDocuments(
             @RequestParam(value = "page", defaultValue = "0") int page,
             @RequestParam(value = "size", defaultValue = "10") int size) {
         User currentUser = SecurityContextHelper.getCurrentUser();
-        Page<Document> documents = documentService.listSharedDocuments(page, size, currentUser);
+        Page<DocumentResponse> documents = documentService.listSharedDocuments(page, size, currentUser);
         return ApiResponse.success(documents);
     }
 
