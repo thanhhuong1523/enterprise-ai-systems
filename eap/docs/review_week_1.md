@@ -1,65 +1,94 @@
-# Báo cáo Đánh giá Thiết kế Hệ thống - Tuần 1 (Cập nhật sau khi sửa đổi)
-
+# BÁO CÁO ĐÁNH GIÁ MÃ NGUỒN TUẦN 1 (BẢN CẬP NHẬT HOÀN CHỈNH)
 **Dự án:** VCC Enterprise AI Knowledge Platform (VCC-EAP)  
-**Tác giả review:** Mentor (AI Assistant)  
-**Tài liệu đánh giá:** `PRD.md`, `architecture_design.md`, `detailed_design.md` (Đã cập nhật ngày 26/06/2026)
+**Người đánh giá:** Antigravity (AI Tech Lead / Architect)  
+**Đối tượng đánh giá:** Mã nguồn Java & React (Week 1 Release)  
 
 ---
 
-## 1. Đánh giá Tổng quan (Overall Assessment)
+## 1. Kết Quả Kiểm Thử Thực Tế trên Public Domain
 
-Sau khi nhận được báo cáo đánh giá lần 1, sinh viên đã nghiêm túc tiếp thu và tiến hành tái cấu trúc toàn diện thiết kế kiến trúc và cơ sở dữ liệu.
+Tôi đã thực hiện kiểm thử tự động trên public domain backend (`https://api-vccintern.shares.zrok.io`) sử dụng các tài khoản và phân quyền thực tế của sinh viên cung cấp (`user1` - BOARD, `user2` - Manager phòng RND, `user3` - Employee phòng HR).
 
-Các thay đổi trong thiết kế mới là **cực kỳ xuất sắc**, giải quyết triệt để 100% các rủi ro hệ thống và bẫy thiết kế đã được chỉ ra, nâng cao đáng kể độ chịu tải và tính bảo mật của hệ thống.
+Kết quả kiểm thử cho thấy **tất cả các logic nghiệp vụ lõi đều hoạt động chính xác 100%**:
 
----
+| Kịch bản Test | API Endpoint | Kết quả thực tế | Trạng thái |
+| :--- | :--- | :--- | :--- |
+| **1. Upload tài liệu (RND)** | `POST /api/v1/original-documents` | Tải file lên thành công, sinh ID có LSB = 0 (`f623e800-...`) và hash SHA-256. | **ĐẠT** |
+| **2. Upload tài liệu (BOARD)** | `POST /api/v1/original-documents` | BOARD tải file lên thành công (`70d4947c-...`). | **ĐẠT** |
+| **3. Cô lập dữ liệu chéo** | `GET /api/v1/original-documents/{id}` | Nhân viên HR (`user3`) gọi trực tiếp tài liệu của RND -> bị chặn đứng (404 Not Found). | **ĐẠT** |
+| **4. Tạo liên kết Alias** | `POST /api/v1/alias-documents` | Manager RND chia sẻ tài liệu sang phòng HR thành công, sinh UUID có LSB = 1. | **ĐẠT** |
+| **5. Xem tài liệu qua Alias** | `GET /api/v1/original-documents/{id}` | Nhân viên HR truy xuất thông tin tài liệu RND thành công sau khi được chia sẻ Alias. | **ĐẠT** |
+| **6. Giải quyết Alias (Download)** | `GET /api/v1/alias-documents/{id}` | Nhân viên HR tải file vật lý của tài liệu RND thành công (200 OK). | **ĐẠT** |
+| **7. Bảo vệ tài liệu BOARD** | `POST /api/v1/alias-documents` | Hệ thống chặn đứng hành vi tạo Alias cho tài liệu của BOARD (`ERR_BOARD_PROTECTION`). | **ĐẠT** |
+| **8. Xóa mềm lan truyền** | `DELETE /api/v1/original-documents/{id}` | Manager RND xóa gốc -> thành công và tự động đánh dấu xóa toàn bộ Alias liên quan. | **ĐẠT** |
+| **9. Kiểm tra sau xóa** | `GET /api/v1/original-documents/{id}` | Nhân viên HR truy xuất lại tài liệu đã chia sẻ -> bị chặn (404 Not Found). | **ĐẠT** |
 
-## 2. Đánh giá đối chiếu Cam kết Vận hành (SLA Compliance)
-
-Dưới đây là bảng đánh giá cập nhật thiết kế của sinh viên so với các cam kết vận hành bắt buộc (SLA) quy định cho Tuần 1:
-
-| Chỉ số SLA yêu cầu                                                                                                              | Thiết kế Mới của Sinh viên                                                                                        | Đánh giá Đạt/Không đạt | Phân tích chi tiết                                                                                                                                                                                                                                                                                              |
-| :------------------------------------------------------------------------------------------------------------------------------ | :---------------------------------------------------------------------------------------------------------------- | :--------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **1. Cô lập dữ liệu**:<br>Khả năng rò rỉ dữ liệu chéo giữa các phòng ban = **0%**.                                              | Sử dụng bộ lọc Hibernate Filter tự động kết hợp với điều kiện logic OR thông minh trên bảng gộp `documents`.      | **ĐẠT**                | **Khắc phục hoàn toàn lỗi Resolve Alias**: Bộ lọc mới cho phép người dùng thuộc phòng ban nhận Alias có quyền Join/Select để đọc tài liệu gốc mà không cần phải tắt Filter thủ công (giữ vững nguyên lý _Secure by Default_). Các phòng ban khác vẫn bị cô lập hoàn toàn.                                       |
-| **2. Tối ưu hóa tài nguyên**:<br>Kiểm tra loại tài liệu (Original/Alias) tiệm cận **0ms**, không làm tăng I/O hay Index lookup. | Áp dụng cơ chế nhúng loại định danh vào bit cuối cùng (LSB) của UUID kết hợp gộp bảng.                            | **ĐẠT**                | **Tối ưu hóa 0ms thực tế**: Hệ thống phân loại tài liệu ngay trên RAM của Java bằng phép toán bitwise `(id.getLeastSignificantBits() & 1L) == 1L` mà không cần thực hiện bất kỳ câu truy vấn DB hay quét đĩa nào. Bảng gộp `documents` giúp lấy tài liệu chỉ bằng 1 câu query duy nhất thay vì quét nhiều bảng. |
-| **3. Tính sẵn sàng API**:<br>Tài liệu API chuẩn hóa, hoạt động đúng 100% các luồng CRUD.                                        | Cập nhật tài liệu REST API với các DTOs rõ ràng, sơ đồ tuần tự (Sequence Diagrams) chi tiết từng luồng nghiệp vụ. | **ĐẠT**                | API được thiết kế khoa học, có sơ đồ tuần tự thể hiện rõ luồng PESSIMISTIC_WRITE lock để chống race condition.                                                                                                                                                                                                  |
-
----
-
-## 3. Các điểm cải tiến xuất sắc (Outstanding Improvements)
-
-1.  **Gộp bảng & Quan hệ tự liên kết (Single Table Design)**:
-    - Học viên đã gộp thực thể `OriginalDocument` và `AliasDocument` thành bảng `documents` duy nhất với quan hệ tự tham chiếu (`parent_id` trỏ đến `documents.id`).
-    - Thiết kế này không chỉ giúp giảm I/O khi truy xuất tài liệu (chỉ dùng 1 câu lệnh `LEFT JOIN` thay vì `UNION` trên nhiều bảng), mà còn tạo tiền đề hoàn hảo để tích hợp Vector Database (`pgvector` ở Tuần 4 & 5) mà không gặp lỗi quan hệ đa hình phức tạp.
-2.  **Sử dụng Bitwise LSB trên UUID**:
-    - Việc nhúng bit 0 (Original) và bit 1 (Alias) vào bit cuối cùng của UUID và kiểm tra trên RAM thể hiện tư duy thiết kế của một Kỹ sư Hệ thống (System Engineer) thực thụ, giúp bảo vệ cơ sở dữ liệu khỏi các truy vấn kiểm tra dư thừa và tối ưu hóa luồng gọi thẳng (Fast-Path Routing).
-3.  **Bộ lọc Hibernate Filter kết hợp**:
-    - Học viên đã xây dựng câu lệnh SQL Filter xuất sắc:
-      ```sql
-      owner_department_id = :userDeptId
-      OR creator_department_id = :userDeptId
-      OR (parent_id IS NULL AND id IN (
-          SELECT parent_id FROM documents
-          WHERE owner_department_id = :userDeptId AND parent_id IS NOT NULL AND deleted_at IS NULL
-      ))
-      ```
-    - Bộ lọc này cho phép: (1) Xem tài liệu gốc của phòng mình; (2) Xem Alias phòng mình nhận; (3) Quản lý Alias phòng mình đã tạo để chia sẻ chéo; (4) Giải quyết (Resolve) Alias chéo phòng ban thành công mà không bị rò rỉ dữ liệu của các tài liệu không được chia sẻ.
-4.  **Chốt chặn Pessimistic Lock**:
-    - Trong các luồng tạo Alias, xóa Alias và xóa mềm tài liệu gốc, học viên đã chèn thêm cơ chế khóa bi quan `FOR UPDATE` (`PESSIMISTIC_WRITE`) để ngăn ngừa tranh chấp dữ liệu khi các tiến trình chạy song song (race condition). Đây là điểm cộng lớn chuẩn bị cho Tuần 2.
+### ⚠️ Phát hiện lỗi bất nhất giữa Tài liệu thiết kế và Thực tế triển khai:
+*   Trong tài liệu `detailed_design.md` của sinh viên ghi nhận body của API tạo Alias là dạng snake_case: `original_document_id` và `alias_department_id`.
+*   Tuy nhiên, trong code Java ([CreateAliasRequest.java](file:///f:/Workplace/vcc/intern/student_repo/eap/src/main/java/com/vccorp/eap/dto/CreateAliasRequest.java#L14)), sinh viên không cấu hình mapper snake_case nên hệ thống **chỉ chấp nhận camelCase** (`originalDocumentId` và `aliasDepartmentId`). Nếu client gửi payload theo tài liệu thiết kế sẽ lập tức bị lỗi `VALIDATION_ERROR` (400 Bad Request).
+*   *Khắc phục*: Sinh viên cần đồng bộ tài liệu hoặc thêm `@JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)` vào các DTO hoặc cấu hình Jackson toàn cục.
 
 ---
 
-## 4. Đánh giá theo Bảng Tiêu chí (Grading Rubric)
+## 2. Mô hình Kiến trúc: Controller -> Service -> DAO (Repository)
 
-Dựa trên bảng tiêu chí tại [mentor_guide_evaluation.md](file:///f:/Workplace/vcc/intern/mentor_guide_evaluation.md):
-
-- **System Foundation**: **Xuất Sắc (9.5/10 điểm)**.
-  - Thiết kế cơ sở dữ liệu và cấu trúc phân quyền hoàn hảo. Xử lý tốt các xung đột dữ liệu chéo và cô lập phòng ban ở mức tối ưu cao nhất (0ms RAM check, Hibernate Filter kết hợp).
-- **Defense & Architecture**: **Xuất Sắc (10/10 điểm)**.
-  - Bảo vệ thành công các quyết định thiết kế bằng việc giải trình rõ ràng sự đánh đổi về mặt hiệu năng của việc gộp bảng và phép toán Bitwise LSB. Sẵn sàng tích hợp sâu các tuần tiếp theo.
+Kiến trúc phân tầng của sinh viên hoàn toàn **tuân thủ mô hình chuẩn Enterprise**:
+*   **Controller Layer**: Rất mỏng (`UserController`, `DocumentController`,...), chỉ đảm nhận việc tiếp nhận request, kiểm tra xác thực (qua `SecurityContextHelper`), và gọi xuống tầng Service. Không chứa bất kỳ câu truy vấn DB hay logic nghiệp vụ nào.
+*   **Service Layer**: Chứa toàn bộ các xử lý nghiệp vụ (`DocumentService`, `UserService`,...) để đảm bảo tính toàn vẹn dữ liệu.
+*   **DAO (Repository) Layer**: Sử dụng Spring Data JPA (`UserRepository`, `DocumentRepository`,...) giúp thao tác CSDL rõ ràng và bảo mật nhờ tham số hóa câu truy vấn.
 
 ---
 
-## 5. Kết luận của Mentor
+## 3. Thiết kế Hướng Đối Tượng (OOP) và Nguyên Tắc Đơn Trách Nhiệm (SRP)
 
-Học viên đã chứng minh được năng lực tự học và tư duy kiến trúc hệ thống vượt trội thông qua đợt tái cấu trúc này. Thiết kế hiện tại đã **sẵn sàng 100% để bước vào giai đoạn code thực tế** cho Tuần 1 và Tuần 2.
+### 3.1. Điểm Tốt (OOP)
+*   Thực thể `Document` tự đóng gói logic kiểm tra phân loại `isAlias()` và `isOriginal()` bằng phép toán bit trên RAM, thể hiện tư duy hướng đối tượng tốt.
+
+### 3.2. Điểm Cần Cải Thiện (SRP)
+*   **Đưa phần validation/tiện ích ra các class Utilities/Static**:
+    *   Trong `UserService.java`, sinh viên tự viết code Regex kiểm tra email, username, kiểm tra độ dài ký tự,... một cách thủ công. Điều này làm code Service bị loãng và khó đọc.
+    *   *Khắc phục*: Nên tách các logic kiểm tra định dạng và định dạng chuỗi này thành các phương thức static nằm trong các lớp tiện ích chuyên biệt (ví dụ: `UserValidationUtils` hoặc `ValidationHelper` đặt tại gói `common.util`).
+*   **Tách biệt logic Quản lý Tệp tin vật lý**:
+    *   `DocumentService.java` hiện đang trực tiếp thực hiện việc ghi file (`Files.copy`) và tạo thư mục lưu trữ (`dir.mkdirs()`).
+    *   *Khắc phục*: Nên tách các thao tác xử lý tệp tin vật lý ra một lớp riêng biệt như `StorageService` (hoặc `FileStorageService`).
+
+---
+
+## 4. Đánh Giá Tính Dễ Bảo Trì và Mở Rộng
+
+*   **Vấn đề phụ thuộc trực tiếp vào Concrete Class thay vì Interface**:
+    *   Các Controller đang tiêm (inject) trực tiếp các Class cụ thể như `DocumentService`, `UserService` thay vì các Interface.
+    *   *Hệ quả*: Giới hạn khả năng bảo trì khi hệ thống lớn lên. Ví dụ nếu sau này cần đổi module lưu trữ file từ Local Server sang AWS S3, ta sẽ phải sửa đổi trực tiếp trên class `DocumentService` thay vì chỉ cần tạo một implementation mới cho Interface `StorageService`.
+    *   *Khắc phục*: Khai báo Interface cho toàn bộ các Service nghiệp vụ và các dịch vụ bổ trợ, thực hiện inject interface tại Controller.
+
+---
+
+## 5. Các Vấn Đề Bảo Mật và Hiệu Năng Cần Lưu Ý
+
+Mặc dù các lỗi CORS và DoS do dung lượng file đã được Mentor xác nhận có thể tạm bỏ qua trong giai đoạn thử nghiệm local, hệ thống vẫn tồn tại một số vấn đề bảo mật và hiệu năng khác cần khắc phục trước khi golive:
+
+*   **Nút thắt hiệu năng truy vấn DB trong JWT Filter**:
+    *   [JwtAuthenticationFilter.java](file:///f:/Workplace/vcc/intern/student_repo/eap/src/main/java/com/vccorp/eap/infrastructure/security/JwtAuthenticationFilter.java#L43) thực hiện `userRepository.existsById(userId)` trên mọi request để kiểm tra user tồn tại. Điều này làm mất đi tính chất "stateless" (không trạng thái) của JWT và tạo tải trọng SELECT liên tục không cần thiết vào DB.
+    *   *Khắc phục*: Có thể bỏ bước check này (tin tưởng hoàn toàn vào chữ ký JWT) hoặc đưa thông tin này vào Redis cache.
+*   **Rò rỉ thông tin đường dẫn vật lý trên server (Information Disclosure)**:
+    *   Khi API phản hồi thông tin tài liệu, thực thể `Document` được trả về trực tiếp và chứa thuộc tính `fileReference` là đường dẫn tuyệt đối của file trên máy chủ (ví dụ: `F:\\Workplace\\vcc\\...`). Kẻ tấn công có thể lợi dụng thông tin này để phục vụ các hành vi khai thác Path Traversal hoặc tìm hiểu cấu trúc hệ thống.
+    *   *Khắc phục*: Sử dụng Response DTO để ẩn hoàn toàn trường `fileReference` trước khi trả về cho client.
+*   **Bypass định dạng file thực tế (Content-Type Spoofing)**:
+    *   Hệ thống chỉ kiểm tra đuôi mở rộng file thông qua chuỗi ký tự tên file (`originalFilename.substring(...)`). Kẻ tấn công dễ dàng bypass bằng cách đổi tên một file script độc hại thành `.pdf` (ví dụ: `shell.sh.pdf`) để upload lên server.
+    *   *Khắc phục*: Sử dụng thư viện kiểm tra cấu hình file thực tế qua Magic Bytes (ví dụ: Apache Tika).
+*   **Lưu trữ Refresh Token ở LocalStorage (Lỗ hổng XSS Hijacking)**:
+    *   Frontend lưu trữ cả `accessToken` và `refreshToken` trong `localStorage` ([AuthContext.tsx](file:///f:/Workplace/vcc/intern/student_repo/eap/frontend/src/store/AuthContext.tsx#L29)). Nếu trang web bị dính lỗi XSS, kẻ tấn công có thể lấy cắp Refresh Token và chiếm quyền điều khiển tài khoản nạn nhân vĩnh viễn.
+    *   *Khắc phục*: Bắt buộc phải cấu hình lưu trữ `refreshToken` dưới dạng **HttpOnly, Secure, SameSite Cookie** từ phía backend.
+
+---
+
+## 6. Điểm Số Đánh Giá Đề Xuất (Rubric Grading)
+
+Dựa trên bảng tiêu chí đánh giá của Mentor:
+
+| Tiêu chí | Điểm số | Nhận xét |
+| :--- | :--- | :--- |
+| **System Foundation** | **8.5 / 10** | **Tốt**: Xử lý tốt race condition bằng bi quan khóa (`FOR UPDATE`), nhúng bitwise UUID tối ưu 0ms check, Hibernate Filter thông minh. API test thực tế chạy đúng logic. Điểm trừ nằm ở nách cổ chai hiệu năng trong JWT Filter. |
+| **Defense & Architecture** | **8.5 / 10** | **Tốt**: Kiến trúc phân tầng Controller-Service-DAO chuẩn. Tuy nhiên thiết kế Service vi phạm SRP (cần đưa validation ra utility class, tách module storage) và thiếu lớp Interface làm giảm tính linh hoạt khi mở rộng. |
+
+**Kết luận:** Bài làm của sinh viên đạt chất lượng tốt, chạy thực tế ổn định. Chỉ cần điều chỉnh các điểm thiết kế code (SRP, Interface) và tối ưu JWT Filter để đạt điểm tuyệt đối.
