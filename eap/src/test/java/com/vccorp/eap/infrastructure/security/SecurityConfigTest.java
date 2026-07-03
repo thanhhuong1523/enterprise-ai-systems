@@ -101,6 +101,28 @@ public class SecurityConfigTest {
     }
 
     @Test
+    public void requestWithInvalidIdFormat_Returns400() throws Exception {
+        String token = "admin-token";
+        UUID userId = UUID.randomUUID();
+        Claims claims = mock(Claims.class);
+        when(claims.get("id", String.class)).thenReturn(userId.toString());
+        when(claims.get("role", String.class)).thenReturn(Role.SYSTEM_ADMIN.name());
+        when(claims.get("email", String.class)).thenReturn("admin@vccorp.vn");
+        when(claims.getSubject()).thenReturn("admin_user");
+
+        when(jwtService.validateToken(token)).thenReturn(true);
+        when(jwtService.parseToken(token)).thenReturn(claims);
+        when(userRepository.existsById(userId)).thenReturn(true);
+
+        mockMvc.perform(get("/api/v1/users/invalid-uuid")
+                .header("Authorization", "Bearer " + token))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"))
+                .andExpect(jsonPath("$.message").value("Trường 'id' không đúng định dạng. Yêu cầu kiểu dữ liệu 'UUID'."));
+    }
+
+    @Test
     public void ping_SucceedsWithoutToken() throws Exception {
         mockMvc.perform(get("/api/v1/ping"))
                 .andExpect(status().isOk())

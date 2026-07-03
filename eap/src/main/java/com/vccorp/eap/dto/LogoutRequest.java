@@ -1,5 +1,6 @@
 package com.vccorp.eap.dto;
 
+import jakarta.validation.constraints.NotBlank;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -8,5 +9,6 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 public class LogoutRequest {
+    @NotBlank(message = "Refresh token không được để trống")
     private String refreshToken;
 }

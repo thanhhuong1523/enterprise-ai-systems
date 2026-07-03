@@ -7,6 +7,7 @@ import com.vccorp.eap.dto.RefreshRequest;
 import com.vccorp.eap.dto.LogoutRequest;
 import com.vccorp.eap.service.AuthService;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
@@ -18,7 +19,7 @@ public class AuthController {
     private final AuthService authService;
 
     @PostMapping("/login")
-    public ApiResponse<LoginResponse> login(@RequestBody LoginRequest request, HttpServletRequest servletRequest) {
+    public ApiResponse<LoginResponse> login(@Valid @RequestBody LoginRequest request, HttpServletRequest servletRequest) {
         String userAgent = servletRequest.getHeader("User-Agent");
         String ip = servletRequest.getHeader("X-Forwarded-For");
         if (ip == null || ip.isEmpty()) {
@@ -29,7 +30,7 @@ public class AuthController {
     }
 
     @PostMapping("/refresh")
-    public ApiResponse<LoginResponse> refresh(@RequestBody RefreshRequest request, HttpServletRequest servletRequest) {
+    public ApiResponse<LoginResponse> refresh(@Valid @RequestBody RefreshRequest request, HttpServletRequest servletRequest) {
         String userAgent = servletRequest.getHeader("User-Agent");
         String ip = servletRequest.getHeader("X-Forwarded-For");
         if (ip == null || ip.isEmpty()) {
@@ -40,7 +41,7 @@ public class AuthController {
     }
 
     @PostMapping("/logout")
-    public ApiResponse<Void> logout(@RequestBody LogoutRequest request) {
+    public ApiResponse<Void> logout(@Valid @RequestBody LogoutRequest request) {
         authService.logout(request.getRefreshToken());
         return ApiResponse.success(null);
     }

@@ -6,6 +6,7 @@ import com.vccorp.eap.infrastructure.security.SecurityContextHelper;
 import com.vccorp.eap.model.Document;
 import com.vccorp.eap.model.User;
 import com.vccorp.eap.service.DocumentService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.http.HttpHeaders;
@@ -24,7 +25,9 @@ import java.util.UUID;
 public class DocumentController {
 
     private final DocumentService documentService;
-
+    
+    // ... skipping other endpoints for brevity
+    
     @PostMapping(value = "/original-documents", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @ResponseStatus(HttpStatus.CREATED)
     public ApiResponse<Document> uploadOriginalDocument(
@@ -68,7 +71,7 @@ public class DocumentController {
     @PutMapping("/original-documents/{id}")
     public ApiResponse<Document> updateOriginalDocument(
             @PathVariable("id") UUID id,
-            @RequestBody com.vccorp.eap.dto.UpdateDocumentRequest request) {
+            @Valid @RequestBody com.vccorp.eap.dto.UpdateDocumentRequest request) {
         User currentUser = SecurityContextHelper.getCurrentUser();
         Document document = documentService.updateOriginalDocument(id, request.getTitle(), currentUser);
         return ApiResponse.success(document);
@@ -76,7 +79,7 @@ public class DocumentController {
 
     @PostMapping("/alias-documents")
     @ResponseStatus(HttpStatus.CREATED)
-    public ApiResponse<Document> createAlias(@RequestBody CreateAliasRequest request) {
+    public ApiResponse<Document> createAlias(@Valid @RequestBody CreateAliasRequest request) {
         User currentUser = SecurityContextHelper.getCurrentUser();
         Document alias = documentService.createAlias(request, currentUser);
         return ApiResponse.success(alias);

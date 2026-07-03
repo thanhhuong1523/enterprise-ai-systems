@@ -5,6 +5,7 @@ import com.vccorp.eap.dto.CreateDepartmentRequest;
 import com.vccorp.eap.dto.UpdateDepartmentRequest;
 import com.vccorp.eap.model.Department;
 import com.vccorp.eap.service.DepartmentService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
@@ -21,7 +22,7 @@ public class DepartmentController {
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    public ApiResponse<Department> createDepartment(@RequestBody CreateDepartmentRequest request) {
+    public ApiResponse<Department> createDepartment(@Valid @RequestBody CreateDepartmentRequest request) {
         Department department = departmentService.createDepartment(request);
         return ApiResponse.success(department);
     }
@@ -41,7 +42,7 @@ public class DepartmentController {
     @PutMapping("/{id}")
     public ApiResponse<Department> updateDepartment(
             @PathVariable("id") UUID id,
-            @RequestBody UpdateDepartmentRequest request) {
+            @Valid @RequestBody UpdateDepartmentRequest request) {
         Department department = departmentService.updateDepartment(id, request);
         return ApiResponse.success(department);
     }

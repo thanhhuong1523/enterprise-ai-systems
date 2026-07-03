@@ -5,6 +5,7 @@ import com.vccorp.eap.dto.CreateUserRequest;
 import com.vccorp.eap.dto.UpdateUserRequest;
 import com.vccorp.eap.model.User;
 import com.vccorp.eap.service.UserService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
@@ -21,7 +22,7 @@ public class UserController {
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    public ApiResponse<User> createUser(@RequestBody CreateUserRequest request) {
+    public ApiResponse<User> createUser(@Valid @RequestBody CreateUserRequest request) {
         User user = userService.createUser(request);
         return ApiResponse.success(user);
     }
@@ -41,7 +42,7 @@ public class UserController {
     @PutMapping("/{id}")
     public ApiResponse<User> updateUser(
             @PathVariable("id") UUID id,
-            @RequestBody UpdateUserRequest request) {
+            @Valid @RequestBody UpdateUserRequest request) {
         User user = userService.updateUser(id, request);
         return ApiResponse.success(user);
     }
