@@ -11,17 +11,19 @@ import com.vccorp.eap.service.AuthService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
-import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseCookie;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
 @RequestMapping("/api/v1/auth")
-@RequiredArgsConstructor
 public class AuthController {
 
     private final AuthService authService;
+
+    public AuthController(AuthService authService) {
+        this.authService = authService;
+    }
 
     @PostMapping("/login")
     public ApiResponse<LoginResponse> login(
@@ -67,7 +69,7 @@ public class AuthController {
         
         // 2. Fallback to request body
         if ((refreshToken == null || refreshToken.isEmpty()) && request != null) {
-            refreshToken = request.getRefreshToken();
+            refreshToken = request.refreshToken();
         }
         
         if (refreshToken == null || refreshToken.isEmpty()) {
@@ -114,7 +116,7 @@ public class AuthController {
         
         // 2. Fallback to request body
         if ((refreshToken == null || refreshToken.isEmpty()) && request != null) {
-            refreshToken = request.getRefreshToken();
+            refreshToken = request.refreshToken();
         }
         
         if (refreshToken != null && !refreshToken.isEmpty()) {

@@ -1,9 +1,7 @@
 package com.vccorp.eap.common.error;
 
-import lombok.Getter;
 import org.springframework.http.HttpStatus;
 
-@Getter
 public enum ErrorCode {
     ERR_UNAUTHENTICATED(HttpStatus.UNAUTHORIZED, "Phiên đăng nhập hết hạn hoặc không hợp lệ."),
     ERR_OWNERSHIP_VIOLATION(HttpStatus.NOT_FOUND, "Tài liệu yêu cầu không tồn tại."),
@@ -22,4 +20,11 @@ public enum ErrorCode {
         this.defaultMessage = defaultMessage;
     }
 
+    public HttpStatus getHttpStatus() {
+        return httpStatus;
+    }
+
+    public String getDefaultMessage() {
+        return defaultMessage;
+    }
 }

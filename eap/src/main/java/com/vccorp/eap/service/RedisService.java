@@ -1,16 +1,18 @@
 package com.vccorp.eap.service;
 
-import lombok.RequiredArgsConstructor;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
 import java.util.concurrent.TimeUnit;
 
 @Service
-@RequiredArgsConstructor
 public class RedisService {
 
     private final StringRedisTemplate redisTemplate;
+
+    public RedisService(StringRedisTemplate redisTemplate) {
+        this.redisTemplate = redisTemplate;
+    }
 
     public void set(String key, String value) {
         redisTemplate.opsForValue().set(key, value);

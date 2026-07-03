@@ -6,7 +6,6 @@ import com.vccorp.eap.dto.DepartmentResponse;
 import com.vccorp.eap.dto.UpdateDepartmentRequest;
 import com.vccorp.eap.service.DepartmentService;
 import jakarta.validation.Valid;
-import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 
@@ -15,10 +14,13 @@ import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/v1/departments")
-@RequiredArgsConstructor
 public class DepartmentController {
 
     private final DepartmentService departmentService;
+
+    public DepartmentController(DepartmentService departmentService) {
+        this.departmentService = departmentService;
+    }
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)

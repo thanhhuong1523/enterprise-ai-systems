@@ -6,19 +6,12 @@ import com.vccorp.eap.common.exception.BusinessException;
 import com.vccorp.eap.model.User;
 import com.vccorp.eap.repository.UserRepository;
 import io.jsonwebtoken.Claims;
-import lombok.AllArgsConstructor;
-import lombok.Builder;
-import lombok.Data;
-import lombok.NoArgsConstructor;
-import lombok.RequiredArgsConstructor;
-import org.springframework.stereotype.Service;
 
+import org.springframework.stereotype.Service;
 import java.time.LocalDateTime;
-import java.util.Date;
 import java.util.UUID;
 
 @Service
-@RequiredArgsConstructor
 public class RefreshTokenService {
 
     private final RedisService redisService;
@@ -26,30 +19,81 @@ public class RefreshTokenService {
     private final ObjectMapper objectMapper;
     private final UserRepository userRepository;
 
-    @Data
-    @Builder
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class RefreshTokenMetadata {
-        private String userId;
-        private String username;
-        private String tokenId;
-        private String createdAt;
-        private String expiresAt;
-        private String userAgent;
-        private String ip;
+    public RefreshTokenService(RedisService redisService,
+                               JwtService jwtService,
+                               ObjectMapper objectMapper,
+                               UserRepository userRepository) {
+        this.redisService = redisService;
+        this.jwtService = jwtService;
+        this.objectMapper = objectMapper;
+        this.userRepository = userRepository;
+    }
+
+    public record RefreshTokenMetadata(
+        String userId,
+        String username,
+        String tokenId,
+        String createdAt,
+        String expiresAt,
+        String userAgent,
+        String ip
+    ) {
+        public String getUserId() { return userId; }
+        public String getUsername() { return username; }
+        public String getTokenId() { return tokenId; }
+        public String getCreatedAt() { return createdAt; }
+        public String getExpiresAt() { return expiresAt; }
+        public String getUserAgent() { return userAgent; }
+        public String getIp() { return ip; }
+
+        public static Builder builder(String userId, String username, String tokenId, String createdAt, String expiresAt) {
+            return new Builder(userId, username, tokenId, createdAt, expiresAt);
+        }
+
+        public static class Builder {
+            private final String userId;
+            private final String username;
+            private final String tokenId;
+            private final String createdAt;
+            private final String expiresAt;
+            private String userAgent;
+            private String ip;
+
+            public Builder(String userId, String username, String tokenId, String createdAt, String expiresAt) {
+                this.userId = userId;
+                this.username = username;
+                this.tokenId = tokenId;
+                this.createdAt = createdAt;
+                this.expiresAt = expiresAt;
+            }
+
+            public Builder userAgent(String userAgent) {
+                this.userAgent = userAgent;
+                return this;
+            }
+
+            public Builder ip(String ip) {
+                this.ip = ip;
+                return this;
+            }
+
+            public RefreshTokenMetadata build() {
+                return new RefreshTokenMetadata(userId, username, tokenId, createdAt, expiresAt, userAgent, ip);
+            }
+        }
     }
 
     public String createRefreshToken(User user, String userAgent, String ip) {
         String tokenId = UUID.randomUUID().toString();
         String token = jwtService.generateRefreshToken(user, tokenId);
 
-        RefreshTokenMetadata metadata = RefreshTokenMetadata.builder()
-                .userId(user.getId().toString())
-                .username(user.getUsername())
-                .tokenId(tokenId)
-                .createdAt(LocalDateTime.now().toString())
-                .expiresAt(LocalDateTime.now().plusNanos(jwtService.getRefreshExpirationMs() * 1_000_000).toString())
+        RefreshTokenMetadata metadata = RefreshTokenMetadata.builder(
+                    user.getId().toString(),
+                    user.getUsername(),
+                    tokenId,
+                    LocalDateTime.now().toString(),
+                    LocalDateTime.now().plusNanos(jwtService.getRefreshExpirationMs() * 1_000_000).toString()
+                )
                 .userAgent(userAgent != null ? userAgent : "Unknown")
                 .ip(ip != null ? ip : "Unknown")
                 .build();
@@ -95,18 +139,18 @@ public class RefreshTokenService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.ERR_UNAUTHENTICATED, "Người dùng không tồn tại hoặc đã bị khóa."));
 
         // 4. Token Rotation (generate new)
-
         String newTokenId = UUID.randomUUID().toString();
         String newAccessToken = jwtService.generateAccessToken(user);
         String newRefreshToken = jwtService.generateRefreshToken(user, newTokenId);
 
         // 5. Store new Refresh Token in Redis
-        RefreshTokenMetadata metadata = RefreshTokenMetadata.builder()
-                .userId(userIdStr)
-                .username(username)
-                .tokenId(newTokenId)
-                .createdAt(LocalDateTime.now().toString())
-                .expiresAt(LocalDateTime.now().plusNanos(jwtService.getRefreshExpirationMs() * 1_000_000).toString())
+        RefreshTokenMetadata metadata = RefreshTokenMetadata.builder(
+                    userIdStr,
+                    username,
+                    newTokenId,
+                    LocalDateTime.now().toString(),
+                    LocalDateTime.now().plusNanos(jwtService.getRefreshExpirationMs() * 1_000_000).toString()
+                )
                 .userAgent(userAgent != null ? userAgent : "Unknown")
                 .ip(ip != null ? ip : "Unknown")
                 .build();
@@ -139,11 +183,13 @@ public class RefreshTokenService {
         return "refresh:" + userId + ":" + tokenId;
     }
 
-    @Data
-    @AllArgsConstructor
-    public static class TokenRotationResult {
-        private final String accessToken;
-        private final String refreshToken;
-        private final User user;
+    public record TokenRotationResult(
+        String accessToken,
+        String refreshToken,
+        User user
+    ) {
+        public String getAccessToken() { return accessToken; }
+        public String getRefreshToken() { return refreshToken; }
+        public User getUser() { return user; }
     }
 }

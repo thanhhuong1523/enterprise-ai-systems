@@ -8,7 +8,6 @@ import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-import lombok.RequiredArgsConstructor;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -22,12 +21,19 @@ import java.util.Collections;
 import java.util.UUID;
 
 @Component
-@RequiredArgsConstructor
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private final JwtService jwtService;
     private final com.vccorp.eap.repository.UserRepository userRepository;
     private final com.vccorp.eap.service.RedisService redisService;
+
+    public JwtAuthenticationFilter(JwtService jwtService,
+                                   com.vccorp.eap.repository.UserRepository userRepository,
+                                   com.vccorp.eap.service.RedisService redisService) {
+        this.jwtService = jwtService;
+        this.userRepository = userRepository;
+        this.redisService = redisService;
+    }
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)

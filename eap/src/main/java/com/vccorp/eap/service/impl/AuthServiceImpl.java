@@ -9,19 +9,27 @@ import com.vccorp.eap.repository.UserRepository;
 import com.vccorp.eap.service.AuthService;
 import com.vccorp.eap.service.JwtService;
 import com.vccorp.eap.service.RefreshTokenService;
-import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
-@RequiredArgsConstructor
 public class AuthServiceImpl implements AuthService {
 
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
     private final RefreshTokenService refreshTokenService;
+
+    public AuthServiceImpl(UserRepository userRepository,
+                           PasswordEncoder passwordEncoder,
+                           JwtService jwtService,
+                           RefreshTokenService refreshTokenService) {
+        this.userRepository = userRepository;
+        this.passwordEncoder = passwordEncoder;
+        this.jwtService = jwtService;
+        this.refreshTokenService = refreshTokenService;
+    }
 
     @Override
     @Transactional(readOnly = true)
@@ -32,36 +40,40 @@ public class AuthServiceImpl implements AuthService {
     @Override
     @Transactional(readOnly = true)
     public LoginResponse login(LoginRequest request, String userAgent, String ip) {
-        if (request.getUsername() == null || request.getUsername().trim().isEmpty() ||
-            request.getPassword() == null || request.getPassword().trim().isEmpty()) {
+        if (request.username() == null || request.username().trim().isEmpty() ||
+            request.password() == null || request.password().trim().isEmpty()) {
             throw new BusinessException(ErrorCode.VALIDATION_ERROR, "Tên đăng nhập và mật khẩu không được rỗng.");
         }
 
-        User user = userRepository.findByUsername(request.getUsername().trim())
+        User user = userRepository.findByUsername(request.username().trim())
                 .orElseThrow(() -> new BusinessException(ErrorCode.ERR_UNAUTHENTICATED, "Tên đăng nhập hoặc mật khẩu không chính xác."));
 
-        if (!passwordEncoder.matches(request.getPassword().trim(), user.getPasswordHash())) {
+        if (!passwordEncoder.matches(request.password().trim(), user.getPasswordHash())) {
             throw new BusinessException(ErrorCode.ERR_UNAUTHENTICATED, "Tên đăng nhập hoặc mật khẩu không chính xác.");
         }
 
         String accessToken = jwtService.generateAccessToken(user);
         String refreshToken = refreshTokenService.createRefreshToken(user, userAgent, ip);
 
-        return LoginResponse.builder()
-                .accessToken(accessToken)
-                .tokenType("Bearer")
-                .expiresIn(900) // 15 mins (900s)
-                .refreshToken(refreshToken)
-                .refreshTokenExpiresIn(604800) // 7 days (604800s)
-                .userInfo(LoginResponse.UserInfo.builder()
-                        .id(user.getId())
-                        .username(user.getUsername())
-                        .email(user.getEmail())
-                        .role(user.getRole())
-                        .departmentId(user.getDepartmentId())
-                        .fullName(user.getFullName())
-                        .phone(user.getPhone())
-                        .build())
+        LoginResponse.UserInfo userInfo = LoginResponse.UserInfo.builder(
+                        user.getId(),
+                        user.getUsername(),
+                        user.getEmail(),
+                        user.getRole()
+                )
+                .departmentId(user.getDepartmentId())
+                .fullName(user.getFullName())
+                .phone(user.getPhone())
+                .build();
+
+        return LoginResponse.builder(
+                    accessToken,
+                    "Bearer",
+                    900,
+                    refreshToken,
+                    604800,
+                    userInfo
+                )
                 .build();
     }
 
@@ -74,21 +86,25 @@ public class AuthServiceImpl implements AuthService {
         RefreshTokenService.TokenRotationResult result = refreshTokenService.rotateRefreshToken(refreshToken, userAgent, ip);
         User user = result.getUser();
 
-        return LoginResponse.builder()
-                .accessToken(result.getAccessToken())
-                .tokenType("Bearer")
-                .expiresIn(900)
-                .refreshToken(result.getRefreshToken())
-                .refreshTokenExpiresIn(604800)
-                .userInfo(LoginResponse.UserInfo.builder()
-                        .id(user.getId())
-                        .username(user.getUsername())
-                        .email(user.getEmail())
-                        .role(user.getRole())
-                        .departmentId(user.getDepartmentId())
-                        .fullName(user.getFullName())
-                        .phone(user.getPhone())
-                        .build())
+        LoginResponse.UserInfo userInfo = LoginResponse.UserInfo.builder(
+                        user.getId(),
+                        user.getUsername(),
+                        user.getEmail(),
+                        user.getRole()
+                )
+                .departmentId(user.getDepartmentId())
+                .fullName(user.getFullName())
+                .phone(user.getPhone())
+                .build();
+
+        return LoginResponse.builder(
+                    result.getAccessToken(),
+                    "Bearer",
+                    900,
+                    result.getRefreshToken(),
+                    604800,
+                    userInfo
+                )
                 .build();
     }
 

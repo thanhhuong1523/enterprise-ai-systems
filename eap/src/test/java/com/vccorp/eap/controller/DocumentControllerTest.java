@@ -71,11 +71,7 @@ public class DocumentControllerTest {
         UUID targetDeptId = UUID.randomUUID();
         CreateAliasRequest request = new CreateAliasRequest(origId, targetDeptId);
 
-        DocumentResponse aliasDoc = DocumentResponse.builder()
-                .id(UUID.randomUUID())
-                .businessCode("ALIA_123456")
-                .title("Mock Alias")
-                .ownerDepartmentId(targetDeptId)
+        DocumentResponse aliasDoc = DocumentResponse.builder(UUID.randomUUID(), "ALIA_123456", "Mock Alias", targetDeptId, java.time.LocalDateTime.now())
                 .build();
 
         when(documentService.createAlias(any(CreateAliasRequest.class), any(User.class))).thenReturn(aliasDoc);

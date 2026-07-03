@@ -7,7 +7,6 @@ import com.vccorp.eap.infrastructure.security.SecurityContextHelper;
 import com.vccorp.eap.model.User;
 import com.vccorp.eap.service.DocumentService;
 import jakarta.validation.Valid;
-import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -21,10 +20,13 @@ import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/v1")
-@RequiredArgsConstructor
 public class DocumentController {
 
     private final DocumentService documentService;
+
+    public DocumentController(DocumentService documentService) {
+        this.documentService = documentService;
+    }
 
     @PostMapping(value = "/original-documents", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @ResponseStatus(HttpStatus.CREATED)
@@ -71,7 +73,7 @@ public class DocumentController {
             @PathVariable("id") UUID id,
             @Valid @RequestBody com.vccorp.eap.dto.UpdateDocumentRequest request) {
         User currentUser = SecurityContextHelper.getCurrentUser();
-        DocumentResponse document = documentService.updateOriginalDocument(id, request.getTitle(), currentUser);
+        DocumentResponse document = documentService.updateOriginalDocument(id, request.title(), currentUser);
         return ApiResponse.success(document);
     }
 

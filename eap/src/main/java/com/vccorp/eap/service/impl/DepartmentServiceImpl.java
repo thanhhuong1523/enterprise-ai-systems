@@ -11,7 +11,6 @@ import com.vccorp.eap.repository.DepartmentRepository;
 import com.vccorp.eap.repository.DocumentRepository;
 import com.vccorp.eap.repository.UserRepository;
 import com.vccorp.eap.service.DepartmentService;
-import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -21,12 +20,19 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 
 @Service
-@RequiredArgsConstructor
 public class DepartmentServiceImpl implements DepartmentService {
 
     private final DepartmentRepository departmentRepository;
     private final UserRepository userRepository;
     private final DocumentRepository documentRepository;
+
+    public DepartmentServiceImpl(DepartmentRepository departmentRepository,
+                                  UserRepository userRepository,
+                                  DocumentRepository documentRepository) {
+        this.departmentRepository = departmentRepository;
+        this.userRepository = userRepository;
+        this.documentRepository = documentRepository;
+    }
 
     private Department findDepartmentById(UUID id) {
         return departmentRepository.findById(id)
@@ -35,10 +41,7 @@ public class DepartmentServiceImpl implements DepartmentService {
 
     private DepartmentResponse mapToResponse(Department dept) {
         if (dept == null) return null;
-        return DepartmentResponse.builder()
-                .id(dept.getId())
-                .code(dept.getCode())
-                .name(dept.getName())
+        return DepartmentResponse.builder(dept.getId(), dept.getCode(), dept.getName())
                 .description(dept.getDescription())
                 .createdAt(dept.getCreatedAt())
                 .updatedAt(dept.getUpdatedAt())
@@ -48,12 +51,12 @@ public class DepartmentServiceImpl implements DepartmentService {
     @Override
     @Transactional
     public DepartmentResponse createDepartment(CreateDepartmentRequest request) {
-        if (request.getCode() == null || request.getCode().trim().isEmpty() ||
-            request.getName() == null || request.getName().trim().isEmpty()) {
+        if (request.code() == null || request.code().trim().isEmpty() ||
+            request.name() == null || request.name().trim().isEmpty()) {
             throw new BusinessException(ErrorCode.VALIDATION_ERROR, "Mã hoặc tên phòng ban không được để trống.");
         }
         
-        String cleanCode = request.getCode().trim().toUpperCase();
+        String cleanCode = request.code().trim().toUpperCase();
         if (cleanCode.length() > 50) {
             throw new BusinessException(ErrorCode.VALIDATION_ERROR, "Mã phòng ban không được vượt quá 50 ký tự.");
         }
@@ -64,7 +67,7 @@ public class DepartmentServiceImpl implements DepartmentService {
             throw new BusinessException(ErrorCode.VALIDATION_ERROR, "Mã phòng ban đã tồn tại.");
         }
 
-        String cleanName = request.getName().trim();
+        String cleanName = request.name().trim();
         if (cleanName.length() > 100) {
             throw new BusinessException(ErrorCode.VALIDATION_ERROR, "Tên phòng ban không được vượt quá 100 ký tự.");
         }
@@ -73,8 +76,8 @@ public class DepartmentServiceImpl implements DepartmentService {
         }
 
         String description = "Phòng ban nghiệp vụ chuyên trách trong hệ thống EAP.";
-        if (request.getDescription() != null && !request.getDescription().trim().isEmpty()) {
-            description = request.getDescription().trim();
+        if (request.description() != null && !request.description().trim().isEmpty()) {
+            description = request.description().trim();
             if (description.length() > 500) {
                 throw new BusinessException(ErrorCode.VALIDATION_ERROR, "Mô tả phòng ban không được vượt quá 500 ký tự.");
             }
@@ -109,8 +112,8 @@ public class DepartmentServiceImpl implements DepartmentService {
     public DepartmentResponse updateDepartment(UUID id, UpdateDepartmentRequest request) {
         Department dept = findDepartmentById(id);
 
-        if (request.getName() != null && !request.getName().trim().isEmpty()) {
-            String cleanName = request.getName().trim();
+        if (request.name() != null && !request.name().trim().isEmpty()) {
+            String cleanName = request.name().trim();
             if (cleanName.length() > 100) {
                 throw new BusinessException(ErrorCode.VALIDATION_ERROR, "Tên phòng ban không được vượt quá 100 ký tự.");
             }
@@ -119,8 +122,8 @@ public class DepartmentServiceImpl implements DepartmentService {
             }
             dept.setName(cleanName);
         }
-        if (request.getCode() != null && !request.getCode().trim().isEmpty()) {
-            String cleanCode = request.getCode().trim().toUpperCase();
+        if (request.code() != null && !request.code().trim().isEmpty()) {
+            String cleanCode = request.code().trim().toUpperCase();
             if (cleanCode.length() > 50) {
                 throw new BusinessException(ErrorCode.VALIDATION_ERROR, "Mã phòng ban không được vượt quá 50 ký tự.");
             }
@@ -132,8 +135,8 @@ public class DepartmentServiceImpl implements DepartmentService {
             }
             dept.setCode(cleanCode);
         }
-        if (request.getDescription() != null) {
-            String desc = request.getDescription().trim();
+        if (request.description() != null) {
+            String desc = request.description().trim();
             if (desc.length() > 500) {
                 throw new BusinessException(ErrorCode.VALIDATION_ERROR, "Mô tả phòng ban không được vượt quá 500 ký tự.");
             }

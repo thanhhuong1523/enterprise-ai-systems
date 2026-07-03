@@ -12,7 +12,6 @@ import com.vccorp.eap.repository.DepartmentRepository;
 import com.vccorp.eap.repository.DocumentRepository;
 import com.vccorp.eap.service.DocumentService;
 import com.vccorp.eap.service.StorageService;
-import lombok.RequiredArgsConstructor;
 import org.apache.tika.Tika;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -27,12 +26,19 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 
 @Service
-@RequiredArgsConstructor
 public class DocumentServiceImpl implements DocumentService {
 
     private final DocumentRepository documentRepository;
     private final DepartmentRepository departmentRepository;
     private final StorageService storageService;
+
+    public DocumentServiceImpl(DocumentRepository documentRepository,
+                               DepartmentRepository departmentRepository,
+                               StorageService storageService) {
+        this.documentRepository = documentRepository;
+        this.departmentRepository = departmentRepository;
+        this.storageService = storageService;
+    }
 
     private static final List<String> ALLOWED_EXTENSIONS = List.of(".pdf", ".docx", ".xlsx", ".pptx");
     private static final long MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
@@ -51,17 +57,12 @@ public class DocumentServiceImpl implements DocumentService {
 
     private DocumentResponse mapToResponse(Document doc) {
         if (doc == null) return null;
-        return DocumentResponse.builder()
-                .id(doc.getId())
-                .businessCode(doc.getBusinessCode())
-                .title(doc.getTitle())
+        return DocumentResponse.builder(doc.getId(), doc.getBusinessCode(), doc.getTitle(), doc.getOwnerDepartmentId(), doc.getCreatedAt())
                 .fileSize(doc.getFileSize())
                 .hash(doc.getHash())
-                .ownerDepartmentId(doc.getOwnerDepartmentId())
                 .parentId(doc.getParentId())
                 .creatorDepartmentId(doc.getCreatorDepartmentId())
                 .createdBy(doc.getCreatedBy())
-                .createdAt(doc.getCreatedAt())
                 .updatedAt(doc.getUpdatedAt())
                 .build();
     }
@@ -259,18 +260,18 @@ public class DocumentServiceImpl implements DocumentService {
             throw new BusinessException(ErrorCode.ERR_FORBIDDEN_ROLE, "Ban Giám Đốc không được phép tạo liên kết Alias.");
         }
 
-        if (request.getOriginalDocumentId() == null || request.getAliasDepartmentId() == null) {
+        if (request.originalDocumentId() == null || request.aliasDepartmentId() == null) {
             throw new BusinessException(ErrorCode.VALIDATION_ERROR, "ID tài liệu gốc và ID phòng ban nhận không được trống.");
         }
 
-        Document originalDoc = documentRepository.findByIdForUpdate(request.getOriginalDocumentId())
+        Document originalDoc = documentRepository.findByIdForUpdate(request.originalDocumentId())
                 .orElseThrow(() -> new BusinessException(ErrorCode.ERR_DOCUMENT_NOT_FOUND));
 
         if (!originalDoc.isOriginal()) {
             throw new BusinessException(ErrorCode.VALIDATION_ERROR, "Không thể tạo liên kết cho một tài liệu Alias khác.");
         }
 
-        if (!departmentRepository.existsById(request.getAliasDepartmentId())) {
+        if (!departmentRepository.existsById(request.aliasDepartmentId())) {
             throw new BusinessException(ErrorCode.VALIDATION_ERROR, "Phòng ban nhận không tồn tại.");
         }
 
@@ -282,12 +283,12 @@ public class DocumentServiceImpl implements DocumentService {
             throw new BusinessException(ErrorCode.ERR_BOARD_PROTECTION);
         }
 
-        if (originalDoc.getOwnerDepartmentId().equals(request.getAliasDepartmentId())) {
+        if (originalDoc.getOwnerDepartmentId().equals(request.aliasDepartmentId())) {
             throw new BusinessException(ErrorCode.VALIDATION_ERROR, "Không thể tự chia sẻ tài liệu cho chính phòng ban của mình.");
         }
 
         boolean exists = documentRepository.existsByParentIdAndOwnerDepartmentIdAndDeletedAtIsNull(
-                originalDoc.getId(), request.getAliasDepartmentId()
+                originalDoc.getId(), request.aliasDepartmentId()
         );
         if (exists) {
             throw new BusinessException(ErrorCode.ERR_DUPLICATE_ALIAS);
@@ -307,7 +308,7 @@ public class DocumentServiceImpl implements DocumentService {
                 .fileReference(null)
                 .fileSize(null)
                 .hash(null)
-                .ownerDepartmentId(request.getAliasDepartmentId())
+                .ownerDepartmentId(request.aliasDepartmentId())
                 .parentId(originalDoc.getId())
                 .creatorDepartmentId(originalDoc.getOwnerDepartmentId())
                 .createdBy(currentUser.getId())
