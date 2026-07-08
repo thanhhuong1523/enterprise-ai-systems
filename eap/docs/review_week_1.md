@@ -1,71 +1,62 @@
-# BÁO CÁO ĐÁNH GIÁ MÃ NGUỒN TUẦN 1 (SAU KHI SINH VIÊN TÁI CẤU TRÚC)
+# BÁO CÁO NGHIỆM THU CHI TIẾT TUẦN 1 (BẢN CẬP NHẬT)
 **Dự án:** VCC Enterprise AI Knowledge Platform (VCC-EAP)  
 **Người đánh giá:** Antigravity (AI Tech Lead / Architect)  
-**Đối tượng đánh giá:** Mã nguồn Java & React (Week 1 Release - Bản cập nhật loại bỏ Lombok và nâng cấp bảo mật)  
+**Đối tượng đánh giá:** Mã nguồn Java & React (Week 1 Release - Phiên bản cập nhật nghiệm thu)  
 
 ---
 
-## 1. Kết Quả Đánh Giá Tổng Quan sau khi Tái Cấu Trúc
+## 1. Kết Quả Nghiệm Thu Tổng Quan
 
-Sinh viên đã tiếp thu toàn bộ ý kiến đánh giá và tiến hành một đợt tái cấu trúc mã nguồn (Refactoring) vô cùng nghiêm túc, đạt tiêu chuẩn kỹ thuật rất cao. Các thay đổi bao gồm:
+Sinh viên đã tiến hành sửa đổi các lỗi bảo mật, lỗi hiệu năng và lỗi edge case được chỉ ra trong đợt review trước:
 
-1.  **Loại bỏ hoàn toàn Lombok**:
-    *   **Đối với DTOs**: Chuyển đổi toàn bộ sang Java `record` (như `CreateUserRequest`, `CreateAliasRequest`, `LoginRequest`,...). Sinh viên đã tự viết các lớp builder tĩnh (`Builder`) lồng trong records để giữ luồng code Fluent API, đồng thời định nghĩa các hàm getter kiểu Java Bean (`getUsername()`) để đảm bảo khả năng tương thích ngược hoàn hảo với các thư viện Jackson/Spring.
-    *   **Đối với Entities**: Viết tay toàn bộ các hàm `getter`, `setter` và mẫu thiết kế `builder` (`UserBuilder`, `DocumentBuilder`,...) trong các entity `User`, `Document`, `Department`.
-2.  **Đảm bảo Nguyên Tắc Đơn Trách Nhiệm (SRP)**:
-    *   Tách biệt toàn bộ logic kiểm tra định dạng Regex bằng cách xây dựng lớp tiện ích tĩnh [ValidationUtils.java](file:///f:/Workplace/vcc/intern/student_repo/eap/src/main/java/com/vccorp/eap/common/util/ValidationUtils.java) trong gói `common.util`.
-    *   Tách biệt logic quản lý, lưu trữ file vật lý từ `DocumentService` sang dịch vụ lưu trữ độc lập `StorageService` (interface) và `FileStorageServiceImpl` (class).
-3.  **Áp Dụng Thiết Kế Interface (Mềm Dẻo & Dễ Mở Rộng)**:
-    *   Khai báo interface cho toàn bộ tầng nghiệp vụ: `UserService`, `DocumentService`, `DepartmentService`, `AuthService`, `StorageService`.
-    *   Chuyển các implementation vào gói `impl/` (`UserServiceImpl`, `DocumentServiceImpl`,...).
-    *   Các Controller hiện tại chỉ inject Interface thay vì Concrete Class, giúp tăng khả năng viết unit test (mocking) và dễ dàng thay thế hạ tầng trong tương lai.
-4.  **Vá lỗi Bảo mật & Rò rỉ thông tin**:
-    *   **Ngăn rò rỉ thư mục (Absolute Path Disclosure)**: Xây dựng các Response DTOs (`DocumentResponse`, `UserResponse`, `DepartmentResponse`). Ẩn hoàn toàn trường `fileReference` (đường dẫn tuyệt đối trên server) trước khi trả về Client.
-    *   **Ngăn chặn bypass định dạng (Content-Type Spoofing)**: Tích hợp thư viện Apache Tika. Thực hiện kiểm tra Magic Bytes của tệp tin tải lên (`tika.detect(file.getInputStream())`) để đối chiếu với Content-Type thực tế, chặn đứng hành vi đổi đuôi file độc hại để bypass hệ thống.
+1.  **Chặn BOARD nhận Alias (BOARD target protection)**:
+    *   *Kết quả*: Sinh viên đã bổ sung hàm kiểm tra `validateAliasTargetDepartment` trong `DocumentServiceImpl.java`. Hệ thống từ chối và ném lỗi `ERR_BOARD_PROTECTION` khi có yêu cầu tạo liên kết Alias hướng tới phòng Ban Giám Đốc (`BOARD`).
+2.  **Khắc phục Nút thắt hiệu năng truy vấn DB trong JWT Filter**:
+    *   *Kết quả*: Cải tiến `JwtAuthenticationFilter` hoạt động stateless. Thực hiện giải mã JWT Claims trực tiếp trên RAM để lấy thông tin của `User` (id, username, email, role, departmentId) và gán vào SecurityContext mà không cần truy vấn CSDL (`userRepository.existsById` đã bị gỡ bỏ). Điều này giúp giảm tải trọng truy vấn trên mỗi API request.
+3.  **Khắc phục rò rỉ Refresh Token ở LocalStorage**:
+    *   *Kết quả*: Backend (`AuthController`) đã chuyển sang thiết lập `refreshToken` thông qua header `Set-Cookie` cấu hình `HttpOnly`, `Secure`, và `SameSite` phù hợp. Trường `refreshToken` trong Response Body được gán về `null` để hạn chế nguy cơ bị khai thác qua lỗi XSS.
+    *   *Frontend*: `AuthContext.tsx` và API client đã cập nhật để gửi request Refresh Token thông qua Axios với tùy chọn `{ withCredentials: true }`, thực hiện xoay vòng token tự động qua Cookie.
+4.  **Bổ sung hệ thống Integration Tests**:
+    *   Sinh viên đã xây dựng các lớp kiểm thử tích hợp tự động: `AliasIntegrationTest`, `RefreshTokenIntegrationTest`, `SecurityIntegrationTest`, và `JwtAuthenticationFilterTest` giúp kiểm soát tốt các thay đổi mã nguồn.
 
 ---
 
-## 2. Kết Quả Kiểm Thử API Thực Tế sau Refactor
+## 2. Các Điểm Then Chốt Đánh Giá (Keynotes)
 
-Tôi đã chạy lại toàn bộ kịch bản kiểm thử tự động trên public domain backend (`https://api-vccintern.shares.zrok.io`) với phiên bản mã nguồn mới nhất.
-
-**Kết quả kiểm thử đạt 100% SUCCESS**:
-
-| Kịch bản Test | Kết quả thực tế | Trạng thái |
-| :--- | :--- | :--- |
-| **1. Upload tài liệu (Manager RND)** | Tải tệp tin `vcc_intern.pdf` lên thành công. Định dạng file thực tế (PDF) được Apache Tika xác minh hợp lệ. Phản hồi API trả về `DocumentResponse` đã ẩn hoàn toàn đường dẫn vật lý `fileReference`. | **ĐẠT** |
-| **2. Chặn upload file giả mạo** | Thử nghiệm upload một file text đổi đuôi thành `.pdf` -> Hệ thống phát hiện Magic Bytes không khớp và chặn đứng kèm lỗi `"Định dạng file thực tế không được hỗ trợ."` | **ĐẠT** |
-| **3. Kiểm soát truy cập chéo** | Nhân viên HR (`user3`) gọi API xem tài liệu của RND -> Bị trả về 404 (Không tìm thấy tài liệu gốc hoặc vi phạm quyền sở hữu). | **ĐẠT** |
-| **4. Tạo liên kết Alias** | RND chia sẻ tài liệu sang HR thành công. LSB của UUID Alias = 1. | **ĐẠT** |
-| **5. Truy xuất qua Alias** | Nhân viên HR xem chi tiết tài liệu RND thành công qua Alias. | **ĐẠT** |
-| **6. Giải quyết Alias (Download)** | Nhân viên HR tải file vật lý qua Alias thành công (200 OK). | **ĐẠT** |
-| **7. Bảo vệ BOARD (Chiều đi)** | Chặn đứng hành vi tạo Alias cho tài liệu của BOARD. | **ĐẠT** |
-| **8. Xóa mềm lan truyền** | Xóa tài liệu gốc RND -> thành công, toàn bộ Alias bị vô hiệu hóa lập tức. | **ĐẠT** |
-| **9. Kiểm tra sau xóa** | Nhân viên HR không thể xem hay resolve tài liệu đã bị xóa gốc (404 OK). | **ĐẠT** |
+*   **Keynote 1: Bảo mật và Phân quyền chéo (Cross-department Security)**
+    *   Mô hình lai kết hợp Hibernate Filter tự động và giải pháp Bitwise UUID cho phép phân loại tài liệu (Original/Alias) trực tiếp trên RAM với độ trễ tiệm cận 0ms, đồng thời đảm bảo an toàn tuyệt đối cho phân vùng dữ liệu giữa các phòng ban nghiệp vụ.
+*   **Keynote 2: Phòng thủ Upload Tệp độc hại & Rò rỉ thông tin (File Security & Info Disclosure)**
+    *   Việc áp dụng thư viện Apache Tika để đối chiếu Magic Bytes thực tế của tệp tin tải lên giúp loại bỏ rủi ro bypass định dạng (Content-Type Spoofing). Bên cạnh đó, việc đóng gói dữ liệu phản hồi qua DTO giúp che giấu hoàn toàn đường dẫn vật lý trên server (`fileReference`), ngăn ngừa nguy cơ bị khai thác Path Traversal.
+*   **Keynote 3: Bảo mật phiên Stateless & Tối ưu hóa hiệu năng (Stateless Auth & Session Security)**
+    *   Cơ chế lưu trữ Refresh Token trong HttpOnly Cookie kết hợp kỹ thuật xoay vòng (Token Rotation) một lần giúp triệt tiêu nguy cơ bị đánh cắp phiên qua lỗi XSS. JWT filter hoạt động hoàn toàn trên RAM giúp giải phóng cơ sở dữ liệu khỏi tải trọng SELECT liên tục trên mỗi HTTP request.
+*   **Keynote 4: Định hướng kỹ thuật cho Tuần 2 (Next Steps for Week 2)**
+    *   Sinh viên cần đặc biệt lưu ý kiểm soát các xung đột CSDL (deadlock) khi triển khai cơ chế kiểm tra tệp tin trùng lặp đồng thời (Concurrent upload & duplication check) ở Tuần 2. Cơ chế khóa bi quan (`PESSIMISTIC_WRITE`) hiện tại cần được tối ưu hóa để đảm bảo khả năng chịu tải cao khi có hàng trăm request đồng thời.
 
 ---
 
-## 3. Các Vấn Đề Bảo Mật và Edge Case Cần Lưu Ý thêm
+## 3. Kết Quả Kiểm Thử API Thực Tế (Quy trình kiểm thử)
 
-*   **🚨 Lỗ hổng Edge Case: Chặn BOARD nhận Alias (BOARD target protection)**:
-    *   *Mô tả*: Phương thức `createAlias` của [DocumentServiceImpl.java](file:///f:/Workplace/vcc/intern/student_repo/eap/src/main/java/com/vccorp/eap/service/impl/DocumentServiceImpl.java#L258) hiện tại mới chỉ chặn chiều đi (không cho phép chia sẻ tài liệu của BOARD) và chặn người gọi là BOARD. Hệ thống **chưa kiểm tra chiều nhận** (`aliasDepartmentId` có phải là BOARD hay không). Điều này dẫn đến lỗ hổng: Một Trưởng phòng RND (`user2`) vẫn có thể chia sẻ tài liệu của phòng mình sang phòng BOARD thông qua việc tạo Alias, vi phạm nguyên tắc *"BOARD hoàn toàn bị cấm nhận Alias dưới mọi hình thức"*.
-    *   *Khắc phục*: Thêm check `if (isBoardDepartment(request.aliasDepartmentId())) { throw new BusinessException(ErrorCode.ERR_BOARD_PROTECTION, "Không thể tạo liên kết Alias chia sẻ đến phòng Ban Giám Đốc."); }` vào trong phương thức `createAlias`.
-*   **Nút thắt hiệu năng truy vấn DB trong JWT Filter**:
-    *   [JwtAuthenticationFilter.java](file:///f:/Workplace/vcc/intern/student_repo/eap/src/main/java/com/vccorp/eap/infrastructure/security/JwtAuthenticationFilter.java#L43) thực hiện `userRepository.existsById(userId)` trên mọi request để kiểm tra user tồn tại. Điều này làm mất đi tính chất "stateless" (không trạng thái) của JWT và tạo tải trọng SELECT liên tục không cần thiết vào DB.
-    *   *Khắc phục*: Có thể bỏ bước check này (tin tưởng hoàn toàn vào chữ ký JWT) hoặc đưa thông tin này vào Redis cache.
-*   **Lưu trữ Refresh Token ở LocalStorage (Lỗ hổng XSS Hijacking)**:
-    *   Frontend lưu trữ cả `accessToken` và `refreshToken` trong `localStorage` ([AuthContext.tsx](file:///f:/Workplace/vcc/intern/student_repo/eap/frontend/src/store/AuthContext.tsx#L29)). Nếu trang web bị dính lỗi XSS, kẻ tấn công có thể lấy cắp Refresh Token và chiếm quyền điều khiển tài khoản nạn nhân vĩnh viễn.
-    *   *Khắc phục*: Bắt buộc phải cấu hình lưu trữ `refreshToken` dưới dạng **HttpOnly, Secure, SameSite Cookie** từ phía backend.
+Kiểm thử tự động trên public domain backend (`https://api-vccintern.shares.zrok.io`) xác nhận các luồng nghiệp vụ hoạt động ổn định:
+
+| Kịch bản Test | API Endpoint | Kết quả thực tế | Trạng thái |
+| :--- | :--- | :--- | :--- |
+| **1. Upload tài liệu (RND)** | `POST /api/v1/original-documents` | Tải tệp tin thành công. Apache Tika xác thực cấu trúc PDF hợp lệ. | **ĐẠT** |
+| **2. Cô lập dữ liệu chéo** | `GET /api/v1/original-documents/{id}` | Nhân viên HR truy cập trực tiếp tài liệu gốc RND bị chặn (404 Not Found). | **ĐẠT** |
+| **3. Tạo liên kết Alias** | `POST /api/v1/alias-documents` | Manager RND chia sẻ tài liệu sang HR thành công. LSB của ID Alias = 1. | **ĐẠT** |
+| **4. Xem tài liệu qua Alias** | `GET /api/v1/original-documents/{id}` | Nhân viên HR xem chi tiết tài liệu RND thành công qua Alias liên kết. | **ĐẠT** |
+| **5. Tải file qua Alias (Download)** | `GET /api/v1/alias-documents/{id}` | Nhân viên HR tải file gốc từ RND qua link Alias thành công (200 OK). | **ĐẠT** |
+| **6. Chống rò rỉ tài liệu BOARD (Source)** | `POST /api/v1/alias-documents` | Hệ thống chặn hành vi tạo Alias từ tài liệu gốc của BOARD. | **ĐẠT** |
+| **7. Chống rác tài liệu BOARD (Target)** | `POST /api/v1/alias-documents` | Hệ thống chặn hành vi tạo Alias chia sẻ tài liệu RND đến BOARD (`ERR_BOARD_PROTECTION`). | **ĐẠT** |
+| **8. Xóa mềm lan truyền (Cascade)** | `DELETE /api/v1/original-documents/{id}`| Xóa tài liệu gốc RND thành công, tự động soft-delete các Alias liên quan. | **ĐẠT** |
+| **9. Kiểm tra sau xóa mềm** | `GET /api/v1/original-documents/{id}` | Truy xuất sau khi xóa bị chặn (404 Not Found). | **ĐẠT** |
 
 ---
 
-## 4. Điểm Số Đánh Giá Đề Xuất (Rubric Grading)
-
-Dựa trên bảng tiêu chí đánh giá của Mentor:
+## 4. Điểm Số Đánh Giá Nghiệm Thu Đề Xuất (Rubric Grading)
 
 | Tiêu chí | Điểm số | Nhận xét |
 | :--- | :--- | :--- |
-| **System Foundation** | **9.2 / 10** | **Tốt**: Code chạy đúng logic 100% trong môi trường test thực tế. Đã tích hợp Apache Tika chống bypass tệp độc hại và Response DTO bảo vệ thông tin máy chủ. Điểm trừ nằm ở nách cổ chai hiệu năng trong JWT Filter và thiếu sót edge case chặn chiều nhận Alias của BOARD. |
-| **Defense & Architecture** | **9.5 / 10** | **Xuất sắc**: Loại bỏ hoàn toàn Lombok khỏi dự án. Áp dụng Record và Builder tự xây dựng rất tốt. Tách biệt utility và file storage (SRP). Thiết kế lỏng qua InterfaceSegregation và Dependency Injection hoàn hảo. |
+| **System Foundation** | **9.0 / 10** | **Tốt**: Đã giải quyết các edge case nghiệp vụ, cô lập dữ liệu chéo tốt, tối ưu hóa stateless JWT filter giảm truy vấn DB, cấu hình an toàn HttpOnly cookie cho Refresh Token. Hệ thống hoạt động đúng theo đặc tả nghiệp vụ.<br>*Điểm cần lưu ý thêm*: Chưa xây dựng cơ chế thu hồi (revoke) access token tức thì trước khi hết hạn (ví dụ sử dụng Redis blacklist cho token bị rò rỉ). |
+| **Defense & Architecture** | **9.0 / 10** | **Tốt**: Kiến trúc phân tầng Controller-Service-DAO chuẩn hóa qua Interface. Thiết kế tuân thủ nguyên tắc SRP, bổ sung validators tiện ích và storage service độc lập, hệ thống Integration Tests đầy đủ.<br>*Điểm cần lưu ý thêm*: Code xử lý lỗi chung (Global Exception Handler) có thể chi tiết hơn đối với một số lỗi hệ thống cấp thấp. |
 
-**Kết luận:** Bài làm của sinh viên sau đợt tái cấu trúc này đã đạt mức **Xuất sắc (9.35/10)**, thể hiện tư duy thiết kế hệ thống vững chắc và khả năng sửa đổi nhanh nhạy theo feedback của Architect/Tech Lead. Đủ điều kiện nghiệm thu Tuần 1 để bước sang Tuần 2.
+**Kết luận:** Bài làm Tuần 1 của sinh viên đạt yêu cầu nghiệm thu **(9.0/10 - Tốt)**. Hệ thống hoạt động đúng logic nghiệp vụ và đáp ứng các tiêu chuẩn bảo mật cơ bản đặt ra cho tuần đầu. Đủ điều kiện để bàn giao và tiếp tục thực hiện Tuần 2.
