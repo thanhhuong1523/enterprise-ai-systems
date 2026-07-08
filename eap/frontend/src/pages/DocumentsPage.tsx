@@ -263,9 +263,9 @@ export const DocumentsPage: React.FC = () => {
   // CRUD (Edit/Delete original doc): Only Department Admin (ROLE_DEPT_MANAGER) or SYSTEM_ADMIN
   const canEditOrDeleteOriginal = user?.role === 'ROLE_DEPT_MANAGER' || user?.role === 'SYSTEM_ADMIN';
 
-  // Filter target eligible departments to share (exclude own department only, BOARD is allowed)
+  // Filter target eligible departments to share (exclude own department and BOARD)
   const eligibleDepts = departments.filter(
-    (d) => d.id !== user?.departmentId
+    (d) => d.id !== user?.departmentId && d.code.toUpperCase() !== 'BOARD'
   );
 
   const shareDeptOptions = [

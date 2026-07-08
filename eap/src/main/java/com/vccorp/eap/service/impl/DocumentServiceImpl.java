@@ -50,6 +50,15 @@ public class DocumentServiceImpl implements DocumentService {
             "application/vnd.openxmlformats-officedocument.presentationml.presentation"
     );
 
+    private void validateUserRole(User user) {
+        if (user == null) {
+            throw new BusinessException(ErrorCode.ERR_UNAUTHENTICATED);
+        }
+        if (user.getRole() == Role.SYSTEM_ADMIN) {
+            throw new BusinessException(ErrorCode.ERR_FORBIDDEN_ROLE, "Quản trị viên hệ thống không được phép thao tác tài liệu.");
+        }
+    }
+
     private Document findDocumentById(UUID id) {
         return documentRepository.findById(id)
                 .orElseThrow(() -> new BusinessException(ErrorCode.ERR_DOCUMENT_NOT_FOUND));
@@ -70,6 +79,7 @@ public class DocumentServiceImpl implements DocumentService {
     @Override
     @Transactional
     public DocumentResponse uploadOriginalDocument(String title, MultipartFile file, User currentUser) {
+        validateUserRole(currentUser);
         if (title == null || title.trim().isEmpty() || file == null || file.isEmpty()) {
             throw new BusinessException(ErrorCode.VALIDATION_ERROR, "Tiêu đề và tệp đính kèm không được trống.");
         }
@@ -99,7 +109,7 @@ public class DocumentServiceImpl implements DocumentService {
         // Validate real file content using Apache Tika
         Tika tika = new Tika();
         try {
-            String mimeType = tika.detect(file.getInputStream());
+            String mimeType = tika.detect(file.getInputStream(), originalFilename);
             if (!ALLOWED_MIME_TYPES.contains(mimeType)) {
                 throw new BusinessException(ErrorCode.VALIDATION_ERROR, "Định dạng file thực tế không được hỗ trợ.");
             }
@@ -141,23 +151,17 @@ public class DocumentServiceImpl implements DocumentService {
     @Override
     @Transactional(readOnly = true)
     public Page<DocumentResponse> listOriginalDocuments(int page, int size, User currentUser) {
+        validateUserRole(currentUser);
         PageRequest pageRequest = PageRequest.of(page, size);
-        Page<Document> documents;
-        if (currentUser.getRole() == Role.SYSTEM_ADMIN) {
-            documents = documentRepository.findByParentIdIsNull(pageRequest);
-        } else {
-            documents = documentRepository.findByParentIdIsNullAndOwnerDepartmentId(currentUser.getDepartmentId(), pageRequest);
-        }
+        Page<Document> documents = documentRepository.findByParentIdIsNullAndOwnerDepartmentId(currentUser.getDepartmentId(), pageRequest);
         return documents.map(this::mapToResponse);
     }
 
     @Override
     @Transactional(readOnly = true)
     public Page<DocumentResponse> listSharedDocuments(int page, int size, User currentUser) {
+        validateUserRole(currentUser);
         PageRequest pageRequest = PageRequest.of(page, size);
-        if (currentUser.getRole() == Role.SYSTEM_ADMIN) {
-            return Page.empty();
-        }
         Page<Document> documents = documentRepository.findByParentIdIsNotNullAndOwnerDepartmentId(currentUser.getDepartmentId(), pageRequest);
         return documents.map(this::mapToResponse);
     }
@@ -165,25 +169,24 @@ public class DocumentServiceImpl implements DocumentService {
     @Override
     @Transactional(readOnly = true)
     public DocumentResponse getOriginalDocumentDetail(UUID id, User currentUser) {
+        validateUserRole(currentUser);
         Document document = findDocumentById(id);
 
         if (document.getDeletedAt() != null) {
             throw new BusinessException(ErrorCode.ERR_DOCUMENT_NOT_FOUND);
         }
 
-        if (currentUser.getRole() != Role.SYSTEM_ADMIN) {
-            if (document.isOriginal()) {
-                if (!document.getOwnerDepartmentId().equals(currentUser.getDepartmentId())) {
-                    boolean hasAlias = documentRepository.existsByParentIdAndOwnerDepartmentIdAndDeletedAtIsNull(document.getId(), currentUser.getDepartmentId());
-                    if (!hasAlias) {
-                        throw new BusinessException(ErrorCode.ERR_OWNERSHIP_VIOLATION);
-                    }
-                }
-            } else {
-                if (!document.getOwnerDepartmentId().equals(currentUser.getDepartmentId()) &&
-                    !document.getCreatorDepartmentId().equals(currentUser.getDepartmentId())) {
+        if (document.isOriginal()) {
+            if (!document.getOwnerDepartmentId().equals(currentUser.getDepartmentId())) {
+                boolean hasAlias = documentRepository.existsByParentIdAndOwnerDepartmentIdAndDeletedAtIsNull(document.getId(), currentUser.getDepartmentId());
+                if (!hasAlias) {
                     throw new BusinessException(ErrorCode.ERR_OWNERSHIP_VIOLATION);
                 }
+            }
+        } else {
+            if (!document.getOwnerDepartmentId().equals(currentUser.getDepartmentId()) &&
+                !document.getCreatorDepartmentId().equals(currentUser.getDepartmentId())) {
+                throw new BusinessException(ErrorCode.ERR_OWNERSHIP_VIOLATION);
             }
         }
 
@@ -193,6 +196,7 @@ public class DocumentServiceImpl implements DocumentService {
     @Override
     @Transactional(readOnly = true)
     public List<DocumentResponse> listDocumentAliases(UUID id, User currentUser) {
+        validateUserRole(currentUser);
         DocumentResponse doc = getOriginalDocumentDetail(id, currentUser);
         return documentRepository.findAllByParentIdAndDeletedAtIsNull(doc.getId()).stream()
                 .map(this::mapToResponse)
@@ -202,19 +206,18 @@ public class DocumentServiceImpl implements DocumentService {
     @Override
     @Transactional
     public DocumentResponse updateOriginalDocument(UUID id, String title, User currentUser) {
+        validateUserRole(currentUser);
         Document document = findDocumentById(id);
         
         if (document.getDeletedAt() != null) {
             throw new BusinessException(ErrorCode.ERR_DOCUMENT_NOT_FOUND);
         }
 
-        if (currentUser.getRole() != Role.SYSTEM_ADMIN) {
-            if (!document.getOwnerDepartmentId().equals(currentUser.getDepartmentId())) {
-                throw new BusinessException(ErrorCode.ERR_OWNERSHIP_VIOLATION);
-            }
+        if (!document.getOwnerDepartmentId().equals(currentUser.getDepartmentId())) {
+            throw new BusinessException(ErrorCode.ERR_OWNERSHIP_VIOLATION);
         }
 
-        if (currentUser.getRole() != Role.ROLE_DEPT_MANAGER && currentUser.getRole() != Role.SYSTEM_ADMIN) {
+        if (currentUser.getRole() != Role.ROLE_DEPT_MANAGER) {
             throw new BusinessException(ErrorCode.ERR_FORBIDDEN_ROLE);
         }
         
@@ -231,6 +234,7 @@ public class DocumentServiceImpl implements DocumentService {
     @Override
     @Transactional
     public void deleteOriginalDocument(UUID id, User currentUser) {
+        validateUserRole(currentUser);
         Document originalDoc = documentRepository.findByIdForUpdate(id)
                 .orElseThrow(() -> new BusinessException(ErrorCode.ERR_DOCUMENT_NOT_FOUND));
 
@@ -256,6 +260,7 @@ public class DocumentServiceImpl implements DocumentService {
     @Override
     @Transactional
     public DocumentResponse createAlias(CreateAliasRequest request, User currentUser) {
+        validateUserRole(currentUser);
         if (currentUser.getRole() == Role.ROLE_BOARD) {
             throw new BusinessException(ErrorCode.ERR_FORBIDDEN_ROLE, "Ban Giám Đốc không được phép tạo liên kết Alias.");
         }
@@ -274,6 +279,8 @@ public class DocumentServiceImpl implements DocumentService {
         if (!departmentRepository.existsById(request.aliasDepartmentId())) {
             throw new BusinessException(ErrorCode.VALIDATION_ERROR, "Phòng ban nhận không tồn tại.");
         }
+
+        validateAliasTargetDepartment(request.aliasDepartmentId());
 
         if (!originalDoc.getOwnerDepartmentId().equals(currentUser.getDepartmentId())) {
             throw new BusinessException(ErrorCode.ERR_OWNERSHIP_VIOLATION);
@@ -321,6 +328,7 @@ public class DocumentServiceImpl implements DocumentService {
     @Override
     @Transactional
     public void deleteAlias(UUID id, User currentUser) {
+        validateUserRole(currentUser);
         Document alias = documentRepository.findById(id)
                 .orElseThrow(() -> new BusinessException(ErrorCode.ERR_DOCUMENT_NOT_FOUND));
 
@@ -346,6 +354,7 @@ public class DocumentServiceImpl implements DocumentService {
     @Override
     @Transactional(readOnly = true)
     public byte[] resolveAlias(UUID id, User currentUser) {
+        validateUserRole(currentUser);
         Document doc = findDocumentById(id);
 
         if (doc.getDeletedAt() != null) {
@@ -372,6 +381,15 @@ public class DocumentServiceImpl implements DocumentService {
             return storageService.loadFile(doc.getFileReference());
         } catch (IOException e) {
             throw new BusinessException(ErrorCode.ERR_SYSTEM_ERROR, "Không thể đọc dữ liệu tệp.");
+        }
+    }
+
+    private void validateAliasTargetDepartment(UUID aliasDepartmentId) {
+        if (isBoardDepartment(aliasDepartmentId)) {
+            throw new BusinessException(
+                    ErrorCode.ERR_BOARD_PROTECTION,
+                    "Không thể chia sẻ tài liệu đến phòng Ban Giám Đốc."
+            );
         }
     }
 

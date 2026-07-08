@@ -18,6 +18,10 @@ public class FileStorageServiceImpl implements StorageService {
 
     @Override
     public String storeFile(MultipartFile file, String filename) throws IOException {
+        if (filename.contains("..") || filename.contains("/") || filename.contains("\\")) {
+            throw new SecurityException("Tên tệp tin không hợp lệ.");
+        }
+
         File dir = new File(uploadDir).getAbsoluteFile();
         if (!dir.exists()) {
             dir.mkdirs();

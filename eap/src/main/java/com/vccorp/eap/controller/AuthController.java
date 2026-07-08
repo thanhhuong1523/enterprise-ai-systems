@@ -20,9 +20,23 @@ import org.springframework.web.bind.annotation.*;
 public class AuthController {
 
     private final AuthService authService;
+    private final com.vccorp.eap.service.JwtService jwtService;
 
-    public AuthController(AuthService authService) {
+    public AuthController(AuthService authService, com.vccorp.eap.service.JwtService jwtService) {
         this.authService = authService;
+        this.jwtService = jwtService;
+    }
+
+    private ResponseCookie createRefreshTokenCookie(String token, HttpServletRequest request) {
+        boolean secure = request.isSecure() || "https".equalsIgnoreCase(request.getHeader("X-Forwarded-Proto"));
+        long maxAge = token == null || token.isEmpty() ? 0 : jwtService.getRefreshExpirationMs() / 1000;
+        return ResponseCookie.from("refreshToken", token == null ? "" : token)
+                .httpOnly(true)
+                .secure(secure)
+                .sameSite(secure ? "None" : "Lax")
+                .path("/")
+                .maxAge(maxAge)
+                .build();
     }
 
     @PostMapping("/login")
@@ -38,16 +52,20 @@ public class AuthController {
         LoginResponse response = authService.login(request, userAgent, ip);
         
         // Write refreshToken to HttpOnly cookie
-        ResponseCookie cookie = ResponseCookie.from("refreshToken", response.getRefreshToken())
-                .httpOnly(true)
-                .secure(true)
-                .sameSite("Lax")
-                .path("/")
-                .maxAge(604800) // 7 days
-                .build();
+        ResponseCookie cookie = createRefreshTokenCookie(response.getRefreshToken(), servletRequest);
         servletResponse.addHeader(HttpHeaders.SET_COOKIE, cookie.toString());
         
-        return ApiResponse.success(response);
+        // Secure response body by nullifying refreshToken
+        LoginResponse secureResponse = LoginResponse.builder(
+                response.getAccessToken(),
+                response.getTokenType(),
+                response.getExpiresIn(),
+                null,
+                0,
+                response.getUserInfo()
+        ).build();
+
+        return ApiResponse.success(secureResponse);
     }
 
     @PostMapping("/refresh")
@@ -67,11 +85,6 @@ public class AuthController {
             }
         }
         
-        // 2. Fallback to request body
-        if ((refreshToken == null || refreshToken.isEmpty()) && request != null) {
-            refreshToken = request.refreshToken();
-        }
-        
         if (refreshToken == null || refreshToken.isEmpty()) {
             throw new BusinessException(ErrorCode.VALIDATION_ERROR, "Refresh Token không được rỗng.");
         }
@@ -85,16 +98,20 @@ public class AuthController {
         LoginResponse response = authService.refresh(refreshToken, userAgent, ip);
         
         // Write rotated refreshToken to HttpOnly cookie
-        ResponseCookie cookie = ResponseCookie.from("refreshToken", response.getRefreshToken())
-                .httpOnly(true)
-                .secure(true)
-                .sameSite("Lax")
-                .path("/")
-                .maxAge(604800) // 7 days
-                .build();
+        ResponseCookie cookie = createRefreshTokenCookie(response.getRefreshToken(), servletRequest);
         servletResponse.addHeader(HttpHeaders.SET_COOKIE, cookie.toString());
         
-        return ApiResponse.success(response);
+        // Secure response body by nullifying refreshToken
+        LoginResponse secureResponse = LoginResponse.builder(
+                response.getAccessToken(),
+                response.getTokenType(),
+                response.getExpiresIn(),
+                null,
+                0,
+                response.getUserInfo()
+        ).build();
+
+        return ApiResponse.success(secureResponse);
     }
 
     @PostMapping("/logout")
@@ -114,23 +131,12 @@ public class AuthController {
             }
         }
         
-        // 2. Fallback to request body
-        if ((refreshToken == null || refreshToken.isEmpty()) && request != null) {
-            refreshToken = request.refreshToken();
-        }
-        
         if (refreshToken != null && !refreshToken.isEmpty()) {
             authService.logout(refreshToken);
         }
         
         // Clear HttpOnly cookie
-        ResponseCookie cookie = ResponseCookie.from("refreshToken", "")
-                .httpOnly(true)
-                .secure(true)
-                .sameSite("Lax")
-                .path("/")
-                .maxAge(0) // immediately expire
-                .build();
+        ResponseCookie cookie = createRefreshTokenCookie("", servletRequest);
         servletResponse.addHeader(HttpHeaders.SET_COOKIE, cookie.toString());
         
         return ApiResponse.success(null);

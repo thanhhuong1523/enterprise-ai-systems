@@ -55,8 +55,7 @@ public class SecurityConfig {
                 "https://*.zrok.io",
                 "http://*.zrok.io",
                 "https://*.shares.zrok.io",
-                "http://*.shares.zrok.io",
-                "*"
+                "http://*.shares.zrok.io"
         ));
         configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));
         configuration.setAllowedHeaders(Arrays.asList("Authorization", "Content-Type", "Accept", "Origin", "X-Requested-With"));

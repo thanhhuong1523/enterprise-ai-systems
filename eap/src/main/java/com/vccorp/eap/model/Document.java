@@ -4,12 +4,14 @@ import jakarta.persistence.*;
 import org.hibernate.annotations.Filter;
 import org.hibernate.annotations.FilterDef;
 import org.hibernate.annotations.ParamDef;
+import org.hibernate.annotations.SQLRestriction;
 
 import java.time.LocalDateTime;
 import java.util.UUID;
 
 @Entity
 @Table(name = "documents")
+@SQLRestriction("deleted_at IS NULL")
 @FilterDef(
     name = "deptIsolationFilter",
     parameters = @ParamDef(name = "userDeptId", type = java.util.UUID.class)

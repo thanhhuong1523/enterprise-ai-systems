@@ -39,7 +39,6 @@ export const LoginPage: React.FC = () => {
       if (response.success && response.data) {
         login(
           response.data.accessToken,
-          response.data.refreshToken,
           response.data.userInfo
         );
         showToast('Đăng nhập thành công', 'success');

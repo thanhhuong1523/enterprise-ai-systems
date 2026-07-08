@@ -134,6 +134,11 @@ public class DocumentServiceTest {
 
         when(departmentRepository.existsById(targetDeptId)).thenReturn(true);
 
+        when(departmentRepository.findById(targetDeptId))
+                .thenReturn(Optional.of(
+                        new Department(targetDeptId, "HR", "Human Resources")
+                ));
+
         when(documentRepository.save(any(Document.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -185,6 +190,42 @@ public class DocumentServiceTest {
 
         when(departmentRepository.existsById(deptId)).thenReturn(true);
 
+        when(departmentRepository.findById(deptId))
+                .thenReturn(Optional.of(
+                        new Department(deptId, "DEV", "Development")
+                ));
+
+        BusinessException ex = assertThrows(
+                BusinessException.class,
+                () -> documentService.createAlias(request, managerUser)
+        );
+
+        assertEquals(ErrorCode.ERR_BOARD_PROTECTION, ex.getErrorCode());
+    }
+
+    @Test
+    void createAlias_TargetIsBOARD_ThrowsException() {
+        UUID origId = new UUID(12345L, 2L);
+
+        Document original = Document.builder()
+                .id(origId)
+                .ownerDepartmentId(deptId)
+                .title("Original")
+                .build();
+
+        CreateAliasRequest request =
+                new CreateAliasRequest(origId, boardDeptId);
+
+        when(documentRepository.findByIdForUpdate(origId))
+                .thenReturn(Optional.of(original));
+
+        when(departmentRepository.existsById(boardDeptId)).thenReturn(true);
+
+        when(departmentRepository.findById(boardDeptId))
+                .thenReturn(Optional.of(
+                        new Department(boardDeptId, "BOARD", "Board")
+                ));
+
         BusinessException ex = assertThrows(
                 BusinessException.class,
                 () -> documentService.createAlias(request, managerUser)
@@ -225,5 +266,54 @@ public class DocumentServiceTest {
 
         assertNotNull(original.getDeletedAt());
         verify(documentRepository, times(1)).softDeleteAliasesByOriginalId(eq(origId), any(LocalDateTime.class));
+    }
+
+    @Test
+    void uploadOriginalDocument_DocxSuccess() throws IOException {
+        byte[] docxBytes = new byte[]{0x50, 0x4B, 0x03, 0x04, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+        MockMultipartFile file = new MockMultipartFile(
+                "file", "test.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", docxBytes
+        );
+        when(storageService.storeFile(any(), anyString())).thenReturn("mock/file/path");
+        when(storageService.loadFile(anyString())).thenReturn(docxBytes);
+        when(documentRepository.save(any(Document.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        DocumentResponse savedDoc = documentService.uploadOriginalDocument("Test Docx", file, employeeUser);
+
+        assertNotNull(savedDoc);
+        assertTrue(savedDoc.isOriginal());
+        assertEquals("Test Docx", savedDoc.getTitle());
+    }
+
+    @Test
+    void uploadOriginalDocument_XlsxSuccess() throws IOException {
+        byte[] xlsxBytes = new byte[]{0x50, 0x4B, 0x03, 0x04, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+        MockMultipartFile file = new MockMultipartFile(
+                "file", "test.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", xlsxBytes
+        );
+        when(storageService.storeFile(any(), anyString())).thenReturn("mock/file/path");
+        when(storageService.loadFile(anyString())).thenReturn(xlsxBytes);
+        when(documentRepository.save(any(Document.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        DocumentResponse savedDoc = documentService.uploadOriginalDocument("Test Xlsx", file, employeeUser);
+
+        assertNotNull(savedDoc);
+        assertTrue(savedDoc.isOriginal());
+        assertEquals("Test Xlsx", savedDoc.getTitle());
+    }
+
+    @Test
+    void uploadOriginalDocument_SpoofedExtension_ThrowsException() throws IOException {
+        byte[] maliciousBytes = "MZ\u0000\u0000 mock executable content".getBytes();
+        MockMultipartFile file = new MockMultipartFile(
+                "file", "malicious.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", maliciousBytes
+        );
+
+        BusinessException ex = assertThrows(BusinessException.class, () ->
+                documentService.uploadOriginalDocument("Malicious Spoof", file, employeeUser)
+        );
+
+        assertEquals(ErrorCode.VALIDATION_ERROR, ex.getErrorCode());
+        assertTrue(ex.getMessage().contains("Định dạng file thực tế không được hỗ trợ."));
     }
 }

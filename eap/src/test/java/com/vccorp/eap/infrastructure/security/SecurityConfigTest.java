@@ -74,7 +74,6 @@ public class SecurityConfigTest {
 
         when(jwtService.validateToken(token)).thenReturn(true);
         when(jwtService.parseToken(token)).thenReturn(claims);
-        when(userRepository.existsById(userId)).thenReturn(true);
 
         mockMvc.perform(get("/api/v1/users")
                 .header("Authorization", "Bearer " + token))
@@ -96,7 +95,6 @@ public class SecurityConfigTest {
 
         when(jwtService.validateToken(token)).thenReturn(true);
         when(jwtService.parseToken(token)).thenReturn(claims);
-        when(userRepository.existsById(userId)).thenReturn(true);
 
         mockMvc.perform(get("/api/v1/users")
                 .header("Authorization", "Bearer " + token))
@@ -115,7 +113,6 @@ public class SecurityConfigTest {
 
         when(jwtService.validateToken(token)).thenReturn(true);
         when(jwtService.parseToken(token)).thenReturn(claims);
-        when(userRepository.existsById(userId)).thenReturn(true);
 
         mockMvc.perform(get("/api/v1/users/invalid-uuid")
                 .header("Authorization", "Bearer " + token))

@@ -2,6 +2,17 @@ import axios from 'axios';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 
+let accessToken: string | null = null;
+let hasSession = false;
+
+export const setAccessToken = (token: string | null) => {
+  accessToken = token;
+};
+
+export const setHasSession = (val: boolean) => {
+  hasSession = val;
+};
+
 export const apiClient = axios.create({
   baseURL: API_BASE_URL,
   headers: {
@@ -12,9 +23,8 @@ export const apiClient = axios.create({
 
 apiClient.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem('accessToken');
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
+    if (accessToken) {
+      config.headers.Authorization = `Bearer ${accessToken}`;
     }
     return config;
   },
@@ -63,7 +73,6 @@ apiClient.interceptors.response.use(
       originalRequest._retry = true;
       isRefreshing = true;
 
-      const hasSession = !!localStorage.getItem('userInfo');
       if (hasSession) {
         try {
           // Sử dụng instance axios sạch để tránh các interceptor khác can thiệp
@@ -74,7 +83,7 @@ apiClient.interceptors.response.use(
           );
           const { accessToken: newAccessToken } = response.data.data;
 
-          localStorage.setItem('accessToken', newAccessToken);
+          setAccessToken(newAccessToken);
 
           apiClient.defaults.headers.common['Authorization'] = `Bearer ${newAccessToken}`;
           originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
@@ -87,15 +96,15 @@ apiClient.interceptors.response.use(
           processQueue(refreshError, null);
           isRefreshing = false;
 
-          localStorage.removeItem('accessToken');
-          localStorage.removeItem('userInfo');
+          setAccessToken(null);
+          setHasSession(false);
 
           window.location.href = '/login';
           return Promise.reject(refreshError);
         }
       } else {
-        localStorage.removeItem('accessToken');
-        localStorage.removeItem('userInfo');
+        setAccessToken(null);
+        setHasSession(false);
         window.location.href = '/login';
       }
     }

@@ -35,17 +35,11 @@ export const DashboardLayout: React.FC = () => {
   const userDept = departments.find((d) => d.id === user?.departmentId);
   const userDeptName = user?.role === 'SYSTEM_ADMIN' ? 'Quản trị hệ thống' : (userDept ? `${userDept.name} (${userDept.code})` : 'Đang tải...');
 
-  const [isCollapsed, setIsCollapsed] = React.useState(() => {
-    return localStorage.getItem('sidebar-collapsed') === 'true';
-  });
+  const [isCollapsed, setIsCollapsed] = React.useState(false);
   const [isMobileOpen, setIsMobileOpen] = React.useState(false);
 
   const toggleCollapse = () => {
-    setIsCollapsed((prev) => {
-      const next = !prev;
-      localStorage.setItem('sidebar-collapsed', String(next));
-      return next;
-    });
+    setIsCollapsed((prev) => !prev);
   };
 
   const executeLogout = async () => {
