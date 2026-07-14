@@ -24,12 +24,20 @@
 | `deleted_at` | TIMESTAMP | YES | | Thời điểm xóa mềm tài liệu. |
 
 ### 1.2. Thiết kế Chỉ mục (Index Design)
-*   **Chỉ mục duy nhất kết hợp lọc tiền tố (uq_documents_hash_dept)**:
-    *   *Mục đích*: Bảo vệ dữ liệu không bị trùng lặp ở tầng DB, đồng thời làm chỉ mục chính phục vụ câu truy vấn gộp tìm kiếm theo mã băm.
-    *   *Loại chỉ mục*: UNIQUE B-Tree.
-    *   *Các trường*: `(hash, owner_department_id)`.
-    *   *Điều kiện lọc (Partial Index)*: `WHERE deleted_at IS NULL`.
-*   *Lưu ý*: Không tạo thêm chỉ mục phụ nào khác trên trường `hash` để tránh dư thừa và giảm hiệu năng ghi.
+Hệ thống sử dụng **hai chỉ mục** độc lập phục vụ cho các mục đích nghiệp vụ khác nhau:
+
+1.  **Chỉ mục duy nhất bán phần (uq_documents_hash_dept)**:
+    *   *Mục đích*: Bảo vệ tính duy nhất, chống ghi trùng lặp tài liệu hoạt động trong phòng ban.
+    *   *SQL*:
+        ```sql
+        CREATE UNIQUE INDEX uq_documents_hash_dept ON documents(hash, owner_department_id) WHERE deleted_at IS NULL;
+        ```
+2.  **Chỉ mục phụ toàn phần trên mã băm (idx_documents_hash)**:
+    *   *Mục đích*: Tối ưu hóa truy vấn tìm kiếm toàn cục theo `hash` để tái sử dụng tệp vật lý (SIS). Vì luồng SIS cần quét trên cả các tài liệu đã bị xóa mềm, chỉ mục này không chứa điều kiện `deleted_at IS NULL`.
+    *   *SQL*:
+        ```sql
+        CREATE INDEX idx_documents_hash ON documents(hash);
+        ```
 
 ---
 
@@ -100,7 +108,7 @@
 Nhằm tránh việc đọc file hai lần gây lãng phí tài nguyên I/O đĩa cứng, hệ thống áp dụng luồng xử lý như sau:
 1.  API tiếp nhận tệp tin dưới dạng luồng dữ liệu (`InputStream`).
 2.  Khởi tạo bộ xử lý tính toán mã băm mật mã (SHA-256) và luồng ghi tệp tạm thời.
-3.  Vừa đọc luồng dữ liệu đầu vào vừa ghi trực tiếp vào một tệp tạm thời trong thư mục `/tmp/eap-uploads`, đồng thời cập nhật trạng thái của bộ tính toán mã băm cho mỗi khối đệm dữ liệu (kích thước đệm khuyến nghị: 8KB).
+3.  Vừa đọc luồng dữ liệu đầu vào vừa ghi trực tiếp vào một tệp tạm thời trong thư mục `/eap-storage/tmp` (được cấu hình cùng mount point mạng dùng chung với thư mục đích), đồng thời cập nhật trạng thái của bộ tính toán mã băm cho mỗi khối đệm dữ liệu (kích thước đệm khuyến nghị: 8KB).
 4.  Khi luồng dữ liệu đọc hết, hoàn tất quá trình ghi tệp tạm thời và kết xuất chuỗi Hex đại diện cho mã băm SHA-256.
 5.  Phương pháp này đảm bảo chỉ đọc dữ liệu nhị phân của tệp tin đúng một lần duy nhất.
 
@@ -110,55 +118,126 @@ Nhằm tránh việc đọc file hai lần gây lãng phí tài nguyên I/O đĩ
 #### Phương thức chính (Ngoài Giao dịch - Non-Transactional)
 1.  Nhận tiêu đề, tệp tin và thông tin người dùng.
 2.  Thực hiện validation vai trò và định dạng tệp tin.
-3.  Gọi bộ xử lý "Hashing & Lưu tệp tạm thời 1-pass" để lấy mã băm `hash` và tệp tạm `tempFile`.
+3.  Gọi bộ xử lý "Hashing & Lưu tệp tạm thời 1-pass" để lấy mã băm `hash` và tệp tạm `tempFile` tại `/eap-storage/tmp/temp_hash_code`.
 4.  **Bảo vệ tài nguyên bằng khối Try-Finally**:
-    *   Để đảm bảo không bị rò rỉ đĩa cứng khi có sự cố, toàn bộ luồng xử lý từ bước này phải nằm trong khối `try-finally`.
-5.  **Fast-Check (Ngoài Giao dịch)**: Thực thi truy vấn gộp cơ sở dữ liệu lọc theo `hash`.
-    *   Nếu kết quả cho thấy đã có bản ghi hoạt động trong cùng phòng ban hiện tại: Đặt cờ hoàn thành, nhảy đến khối `finally` để xóa tệp tạm `tempFile` và trả về phản hồi trùng lặp (HTTP 200 OK + `duplicated: true`).
+    *   Toàn bộ luồng xử lý từ bước này phải nằm trong khối `try-finally` để đảm bảo dọn dẹp file tạm.
+5.  **Fast-Check (Ngoài Giao dịch)**: Thực thi **Truy vấn gộp Aggregate (Query 2)**.
+    *   Nếu `hasActiveInDept` trả về `true`: Đặt cờ hoàn thành, nhảy đến khối `finally` để xóa tệp tạm `tempFile` và thực thi **Truy vấn lấy thông tin tài liệu (Query 4)** bằng `activeDocId` để trả về phản hồi trùng lặp (HTTP 200 OK + `duplicated: true`).
 6.  Nếu chưa có bản ghi trùng lặp trong phòng ban, chuyển tiếp yêu cầu đến phương thức giao dịch để thực hiện ghi nhận.
 
 #### Phương thức Giao dịch (Trong Giao dịch - Transactional)
 1.  Mở giao dịch (Transaction) cơ sở dữ liệu mới.
-2.  Yêu cầu khóa cố vấn giao dịch PostgreSQL (Advisory Lock) bằng câu lệnh băm chuỗi tích hợp của database:
-    `SELECT pg_advisory_xact_lock(hashtext(concat(phòng_ban, ':', mã_băm)))`
-3.  **Double-Check (Trong Giao dịch)**: Thực thi lại câu truy vấn gộp cơ sở dữ liệu lọc theo `hash`.
-    *   Nếu phát hiện tệp đã tồn tại trong phòng ban (do luồng khác vừa ghi và commit trong lúc chờ khóa): Giải phóng giao dịch, báo hiệu hoàn thành để khối `finally` xóa tệp tạm `tempFile`, và trả về phản hồi trùng lặp (HTTP 200 OK + `duplicated: true`).
+2.  Yêu cầu khóa cố vấn giao dịch PostgreSQL (Advisory Lock) bằng **Yêu cầu Khóa 64-bit (Query 1)**:
+    ```sql
+    SELECT pg_advisory_xact_lock(hashtextextended(concat(:ownerDepartmentId, ':', :hash), 0));
+    ```
+3.  **Double-Check (Trong Giao dịch)**: Thực thi lại **Truy vấn gộp Aggregate (Query 2)**.
+    *   Nếu `hasActiveInDept` trả về `true` (do luồng khác vừa ghi và commit trong lúc chờ khóa): Giải phóng giao dịch, báo hiệu hoàn thành để khối `finally` xóa tệp tạm `tempFile`, thực thi **Truy vấn lấy thông tin tài liệu (Query 4)** bằng `activeDocId` và trả về phản hồi trùng lặp (HTTP 200 OK + `duplicated: true`).
 4.  **Xử lý lưu trữ vật lý**:
-    *   Nếu kết quả truy vấn gộp cho thấy tệp vật lý đã từng tồn tại trên hệ thống (cột `oldestFileRef` không rỗng): Tái sử dụng liên kết tệp vật lý cũ nhất này, đồng thời báo hiệu để khối `finally` xóa tệp tạm `tempFile`.
-    *   Nếu tệp vật lý chưa từng tồn tại: Di chuyển tệp tạm `tempFile` vào đường dẫn lưu trữ chính thức đặt tên theo mã băm (`/eap-storage/{hash}`) bằng thao tác đổi tên tệp tức thời (atomic rename ở tầng hệ điều hành).
+    *   Nếu `oldestFileRef` không rỗng: Tái sử dụng liên kết tệp vật lý cũ nhất này, đồng thời báo hiệu để khối `finally` xóa tệp tạm `tempFile`.
+    *   Nếu `oldestFileRef` rỗng (tệp vật lý chưa từng tồn tại): Di chuyển tệp tạm `tempFile` vào đường dẫn lưu trữ chính thức đặt tên theo mã băm (`/eap-storage/{hash}`) bằng thao tác đổi tên tệp tức thời (atomic rename ở tầng hệ điều hành).
         *   *Lưu ý xử lý xung đột liên phòng ban*: Nếu phát hiện lỗi tệp đích đã tồn tại (do phòng ban khác chạy song song vừa thực hiện rename thành công), tiến hành bắt ngoại lệ `FileAlreadyExistsException`, báo hiệu để khối `finally` tự động hủy tệp tạm `tempFile` và tái sử dụng đường dẫn tệp đích đã có.
-5.  Ghi nhận bản ghi siêu dữ liệu tài liệu mới vào cơ sở dữ liệu.
-6.  Kết thúc giao dịch (Commit). Database tự động thu hồi khóa cố vấn và đóng kết nối giao dịch.
+5.  Thực hiện **Truy vấn thêm bản ghi mới (Query 3)** để lưu siêu dữ liệu tài liệu mới vào cơ sở dữ liệu.
+6.  Kết thúc giao dịch (Commit). Database tự động thu hồi khóa cố vấn và đóng kết nối giao dịch. Trả về siêu dữ liệu vừa tạo (HTTP 201 Created + `duplicated: false`).
 
 #### Khối Dọn dẹp Cuối cùng (Khối Finally của Phương thức chính)
 *   Nếu tệp tạm `tempFile` vẫn tồn tại trên đĩa và luồng xử lý chưa đánh dấu di chuyển tệp thành công -> Thực hiện xóa tệp tạm `tempFile` ngay lập tức để giải phóng tài nguyên đĩa.
 
-### 3.3. Đặc tả truy vấn gộp Aggregate
-Câu truy vấn gộp duy nhất thực hiện quét trên chỉ mục duy nhất `uq_documents_hash_dept` lọc theo `hash` để trả về đúng 1 dòng logic chứa 3 thông số:
-1.  `hasActiveInDept`: Trạng thái boolean kiểm tra tồn tại bản ghi hoạt động (`deleted_at IS NULL`) của phòng ban đang yêu cầu.
-2.  `activeDocId`: Mã định danh UUID của bản ghi hoạt động đó (nếu có).
-3.  `oldestFileRef`: Đường dẫn tệp vật lý được tạo sớm nhất có cùng `hash` trên toàn hệ thống (sử dụng hàm gom mảng sắp xếp theo thời gian tạo tăng dần `created_at ASC`, **không lọc theo trạng thái xóa mềm**).
+---
+
+## 4. Các câu lệnh SQL Tường minh (Raw SQL Queries)
+
+Dưới đây là đặc tả chi tiết của toàn bộ các câu lệnh SQL được sử dụng trong hệ thống:
+
+### Query 1: Yêu cầu khóa cố vấn 64-bit (Advisory Lock)
+Sử dụng hàm `hashtextextended` của PostgreSQL để tạo giá trị băm 64-bit từ chuỗi khóa kết hợp giữa mã phòng ban và mã băm tệp, giảm thiểu tỷ lệ va chạm xuống tối đa.
+```sql
+SELECT pg_advisory_xact_lock(hashtextextended(concat(:ownerDepartmentId, ':', :hash), 0));
+```
+
+### Query 2: Truy vấn gộp Aggregate (Fast-Check và Double-Check)
+Truy vấn này quét trên chỉ mục `idx_documents_hash` theo mã băm tệp để lấy ra trạng thái trùng lặp và đường dẫn file vật lý cũ nhất.
+```sql
+SELECT 
+    bool_or(owner_department_id = :ownerDepartmentId AND deleted_at IS NULL) AS has_active_in_dept,
+    (array_agg(id ORDER BY created_at ASC) FILTER (WHERE owner_department_id = :ownerDepartmentId AND deleted_at IS NULL))[1] AS active_doc_id,
+    (array_agg(file_reference ORDER BY created_at ASC) FILTER (WHERE file_reference IS NOT NULL))[1] AS oldest_file_ref
+FROM documents
+WHERE hash = :hash;
+```
+*   `has_active_in_dept`: Trả về `true` nếu phòng ban đã có bản ghi hoạt động trùng khớp.
+*   `active_doc_id`: UUID của bản ghi hoạt động đó (lấy bản ghi tạo sớm nhất nếu có nhiều hơn một).
+*   `oldest_file_ref`: Đường dẫn tệp vật lý cũ nhất từng tồn tại trên đĩa của mã băm này để phục vụ tái sử dụng (không lọc theo `deleted_at`).
+
+### Query 3: Truy vấn thêm bản ghi tài liệu mới
+```sql
+INSERT INTO documents (
+    id, 
+    business_code, 
+    title, 
+    file_reference, 
+    file_size, 
+    hash, 
+    owner_department_id, 
+    parent_id, 
+    creator_department_id, 
+    created_by, 
+    created_at
+) VALUES (
+    :id, 
+    :businessCode, 
+    :title, 
+    :fileReference, 
+    :fileSize, 
+    :hash, 
+    :ownerDepartmentId, 
+    :parentId, 
+    :creatorDepartmentId, 
+    :createdBy, 
+    NOW()
+);
+```
+
+### Query 4: Truy vấn lấy siêu dữ liệu tài liệu
+Sử dụng để lấy thông tin tài liệu trùng lặp trả về cho client.
+```sql
+SELECT 
+    id, 
+    business_code, 
+    title, 
+    file_reference, 
+    file_size, 
+    hash, 
+    owner_department_id, 
+    parent_id, 
+    creator_department_id, 
+    created_by, 
+    created_at, 
+    updated_at
+FROM documents
+WHERE id = :id;
+```
 
 ---
 
-## 4. Quản lý Exception & Timeout (Exception & Timeout Management)
+## 5. Quản lý Exception & Timeout (Exception & Timeout Management)
 
-### 4.1. Lỗi Hết hạn kết nối DB (Connection Pending Timeout)
+### 5.1. Lỗi Hết hạn kết nối DB (Connection Pending Timeout)
 *   **Kịch bản**: stress test 150 requests đồng thời trong khi pool size là 110. 40 requests xếp hàng sau sẽ bị chặn quá 5 giây tại pool chờ kết nối DB.
 *   **Xử lý**: Hệ thống bắt ngoại lệ chờ kết nối (`SQLTransientConnectionException` hoặc tương đương) tại Handler toàn cục, ghi log cảnh báo và trả về HTTP 429 Too Many Requests (JSON lỗi `ERR_CONCURRENT_UPLOAD`) thay vì ném lỗi HTTP 500.
 
-### 4.2. Lỗi vi phạm UNIQUE constraint (Lá chắn cuối cùng)
+### 5.2. Lỗi vi phạm UNIQUE constraint (Lá chắn cuối cùng)
 *   **Kịch bản**: Sự cố bất ngờ khiến Double-Check bị vượt qua và xảy ra lỗi vi phạm ràng buộc unique `uq_documents_hash_dept` ở database.
 *   **Xử lý**: Tầng Handler toàn cục bắt ngoại lệ `DataIntegrityViolationException`, ghi nhận cảnh báo (Mức độ WARN) kèm mã băm tệp, tự động truy vấn lại thông tin bản ghi cũ theo mã băm để phản hồi thành công (HTTP 200 OK + `duplicated: true`) cho người dùng một cách âm thầm.
 
 ---
 
-## 5. Kế hoạch Dọn dẹp Định kỳ (Daemon Cleanup Strategy)
+## 6. Kế hoạch Dọn dẹp Định kỳ (Daemon Cleanup Strategy)
 
 *   **Mục đích**: Dọn dẹp các tệp tạm thời hoặc tệp mồ côi (file vật lý tồn tại trên đĩa nhưng không có metadata trong DB) phát sinh do sự cố sập nguồn đột ngột của node ứng dụng.
 *   **Tiến trình 1: Dọn dẹp tệp đệm tạm thời**:
     *   *Tần suất*: Chạy định kỳ mỗi 1 giờ (Cron job).
-    *   *Logic*: Quét thư mục tạm `/tmp/eap-uploads` và xóa bỏ toàn bộ các tệp đệm tạm thời có thời gian tạo cũ hơn 1 giờ.
+    *   *Logic*: Quét thư mục tạm `/eap-storage/tmp` và xóa bỏ toàn bộ các tệp đệm tạm thời có thời gian tạo cũ hơn 1 giờ.
 *   **Tiến trình 2: Dọn dẹp tệp vật lý mồ côi (Orphaned Files)**:
     *   *Tần suất*: Chạy định kỳ mỗi 24 giờ vào khung giờ thấp điểm (02:00 AM).
     *   *Logic*: Quét thư mục lưu trữ `/eap-storage`, so khớp tên tệp (hash) với danh sách `hash` đang hoạt động trong bảng `documents`. Nếu tệp vật lý trên đĩa không tồn tại bất kỳ tham chiếu nào trong cơ sở dữ liệu (kể cả bản ghi đã xóa mềm - theo quy tắc BR-4), tiến hành xóa tệp vật lý đó để giải phóng ổ đĩa.
