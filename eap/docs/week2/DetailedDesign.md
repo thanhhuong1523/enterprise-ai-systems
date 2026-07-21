@@ -500,7 +500,115 @@ WHERE id = :id;
 ### 7.2. Kết luận Giải pháp Đề xuất
 
 1. **Từ bỏ Option 3 (JPA `@Lock(PESSIMISTIC_WRITE)`):** Do `PESSIMISTIC_WRITE` dựa trên `FOR UPDATE` cấp dòng (row-level lock), nó hoàn toàn không thể khóa được các yêu cầu tải lên tệp tin mới (chưa có bản ghi nào trong database).
-2. **Lựa chọn Option 1 (`JdbcTemplate` + `TransactionTemplate` Pinned Connection):**
+2. Lựa chọn Option 1 (`JdbcTemplate` + `TransactionTemplate` Pinned Connection):
    * Đây là phương án tối ưu nhất về mặt kiến trúc.
-   * `JdbcTemplate` kết hợp `TransactionTemplate` đảm bảo chuỗi thao tác `pg_try_advisory_lock` -> `Double-Check` -> `Atomic Rename` -> `INSERT` -> `pg_advisory_unlock` được chạy nguyên tử trên đúng **1 kết nối JDBC vật lý duy nhất**.
+   * `JdbcTemplate` kết hợp `TransactionTemplate` đảm bảo chuỗi thao tác `pg_advisory_lock` -> `Double-Check` -> `Atomic Rename` -> `INSERT` -> `pg_advisory_unlock` được chạy nguyên tử trên đúng **1 kết nối JDBC vật lý duy nhất**.
    * Đảm bảo tính Idempotency, không gây connection pool starvation, và bảo vệ an toàn cho SLA phản hồi của hệ thống.
+
+---
+
+## 8. Migration Notes / Breaking Changes from Week 1
+
+Để hỗ trợ các nhà phát triển tích hợp và nâng cấp mã nguồn từ Week 1 lên Week 2 một cách mượt mà và không có sai sót, dưới đây là chi tiết các thay đổi mang tính đột phá (breaking changes), cấu trúc luồng xử lý mới, ảnh hưởng dữ liệu, ảnh hưởng bộ kiểm thử (test suite) cùng danh sách kiểm tra các tệp cần thay đổi.
+
+### 8.1. StorageService Refactoring (Tái cấu trúc dịch vụ lưu trữ)
+Dịch vụ quản lý tệp tin vật lý `StorageService` của Week 1 đã được thay thế bằng một giao diện chuyên biệt hơn để phục vụ cho luồng xử lý nguyên tử 2 pha (temp file & atomic rename).
+
+* **Interface cũ của `StorageService` (Week 1)**:
+  ```java
+  public interface StorageService {
+      String storeFile(MultipartFile file, String filename) throws IOException;
+      byte[] loadFile(String fileReference) throws IOException;
+  }
+  ```
+* **Interface mới của `FileStorageService` (Week 2)**:
+  Nằm trong gói `com.vccorp.eap.service.storage`:
+  ```java
+  public interface FileStorageService {
+      SinglePassStorageResult storeTempFile(InputStream inputStream) throws IOException;
+      String moveTempToPermanent(Path tempFilePath, String hash) throws IOException;
+      void deleteTempFileQuietly(Path tempFilePath);
+      byte[] loadFile(String fileReference) throws IOException;
+  }
+  ```
+* **Các thay đổi chi tiết**:
+  - **Xóa phương thức**: `storeFile(MultipartFile file, String filename)` bị xóa hoàn toàn vì luồng tải lên không còn lưu trực tiếp file với tên xác định ngay từ đầu.
+  - **Thêm phương thức**:
+    - `storeTempFile`: Đọc stream dữ liệu 1-pass ghi vào thư mục tạm `/eap-storage/tmp/temp_<uuid>` đồng thời tính hash SHA-256 để trả về DTO `SinglePassStorageResult` (chứa `hash`, `fileSize`, và `tempFilePath`).
+    - `moveTempToPermanent`: Sử dụng thao tác đổi tên nguyên tử (`Files.move` với `StandardCopyOption.ATOMIC_MOVE` ở tầng OS) để chuyển file tạm sang vị trí lưu trữ chính thức `/eap-storage/{hash}`.
+    - `deleteTempFileQuietly`: Thực hiện xóa file tạm trong khối `finally` của luồng xử lý nghiệp vụ để giải phóng bộ nhớ đĩa khi phát hiện tệp trùng lặp hoặc xảy ra lỗi tải lên.
+  - **Đổi kiểu trả về/Phương thức đọc file**:
+    - Phương thức đọc file `loadFile(String fileReference)` được giữ lại để đảm bảo tính tương thích ngược cho các use case tải xuống, xem trước hoặc tải tệp lên.
+* **Ảnh hưởng đến các dịch vụ & Use cases liên quan**:
+  - **`resolveAlias()` / Download document / Preview document**: Các use case này hoạt động hoàn toàn tương thích và **không cần chỉnh sửa logic lấy tệp**. Dù tệp vật lý của Week 2 được lưu trữ theo tên là mã băm SHA-256 (`/eap-storage/{hash}`) thay vì UUID của Week 1, đường dẫn tuyệt đối của nó vẫn được lưu trữ trong cột `file_reference` của bảng `documents`. Khi client gọi API download hoặc preview, hệ thống truy vấn thực thể `Document` để lấy `file_reference` và chuyển tiếp trực tiếp vào `FileStorageService.loadFile(fileReference)`. Do đó cơ chế đọc dữ liệu nhị phân không đổi.
+  - **`DocumentServiceImpl`**: Sẽ bị ảnh hưởng nặng nhất ở luồng `uploadOriginalDocument` vì interface `StorageService` cũ không còn tồn tại, buộc phải viết lại để tích hợp với luồng phối hợp tải lên mới.
+
+### 8.2. Upload Pipeline Changes (Thay đổi đường ống tải lên)
+Đường ống xử lý tệp tải lên được phân rã để tuân thủ Nguyên tắc Đơn trách nhiệm (SRP), tránh việc `DocumentServiceImpl` gánh vác quá nhiều logic phức tạp.
+
+* **Sự thay đổi mô hình**:
+  - **Cũ (Week 1)**:
+    `DocumentController` → `DocumentServiceImpl` → `StorageService`
+  - **Mới (Week 2)**:
+    `DocumentController` → `DocumentServiceImpl` (Orchestrator) → `DocumentUploadCoordinator` → `FileValidationService` → `BusinessCodeAllocator` → `FileStorageService`
+* **Bản đồ trách nhiệm của các thành phần**:
+  1. **`DocumentController`**: Tiếp nhận HTTP request chứa payload tệp (`MultipartFile`), trích xuất các thông tin nghiệp vụ và chuyển giao cho `DocumentServiceImpl`.
+  2. **`DocumentServiceImpl` (Orchestrator)**: Đóng vai trò bộ điều phối chính. Chịu trách nhiệm kiểm tra quyền hạn (RBAC), quản trị transaction biên (`TransactionTemplate`), quản lý vòng đời khóa cố vấn PostgreSQL (`DocumentAdvisoryLockHandler`), thực thi logic Fast-Check / Double-Check thông qua helper, lưu siêu dữ liệu và chuyển đổi sang DTO phản hồi.
+  3. **`DocumentUploadCoordinator`**: Phối hợp luồng tải lên vật lý. Nhận `InputStream` từ controller để gọi `FileStorageService` ghi file tạm, điều phối logic validation, lưu giữ thông tin kết quả băm và quản lý việc dọn dẹp file tạm trên đĩa.
+  4. **`FileValidationService`**: Chuyên biệt hóa việc xác thực tính hợp lệ của tệp: kiểm tra định dạng mở rộng (extension), giới hạn dung lượng tệp (<= 50MB) và đặc biệt dùng Apache Tika để phát hiện định dạng nhị phân thực tế (magic bytes) từ luồng file tạm.
+  5. **`BusinessCodeAllocator`**: Chịu trách nhiệm phân bổ mã nghiệp vụ `business_code` theo định dạng quy chuẩn của Week 2 bằng cách gọi sequence CSDL.
+  6. **`FileStorageService`**: Thực thi thao tác I/O vật lý trên đĩa (ghi tệp tạm, atomic move, xóa tệp tạm).
+
+### 8.3. business_code Migration (Di chuyển dữ liệu mã nghiệp vụ)
+Week 1 sinh mã `business_code` dưới dạng ngẫu nhiên (`"ORIG_" + UUID.randomUUID().toString().substring(0, 8)`). Week 2 chuyển sang sử dụng sequence tăng dần định dạng quy chuẩn (`'ORIG_' || lpad(nextval('doc_business_code_seq')::text, 8, '0')`).
+
+* **Ảnh hưởng tới dữ liệu hiện có**:
+  - Không có xung đột hoặc lỗi định dạng xảy ra với dữ liệu cũ trong CSDL. Các tài liệu đã lưu từ trước vẫn giữ nguyên mã cũ và hoạt động bình thường.
+* **Ảnh hưởng tới Flyway migration**:
+  - Chúng ta cần tạo một migration mới `V10__add_business_code_sequence.sql` để khởi tạo sequence `doc_business_code_seq` trong PostgreSQL.
+  - Các tệp migration cũ từ `V1` đến `V9` **phải giữ nguyên tuyệt đối**, không được chỉnh sửa để tránh lỗi checksum kiểm tra lịch sử của Flyway.
+* **Ảnh hưởng tới các migration V2, V5, V6**:
+  - Các migration này chỉ thực hiện seed dữ liệu cho bảng `users` và `departments`, hoàn toàn không chứa câu lệnh chèn dữ liệu vào bảng `documents`. Do đó chúng hoàn toàn không bị ảnh hưởng.
+* **Ảnh hưởng tới dữ liệu seed**:
+  - Hệ thống hiện tại không seed bất kỳ bản ghi `documents` nào vào CSDL lúc khởi tạo. Dữ liệu seed chỉ gồm danh sách phòng ban và tài khoản quản trị viên.
+* **Kết luận về di chuyển dữ liệu (Data Migration)**:
+  - **Không cần thực hiện bất kỳ script di chuyển dữ liệu (data migration) nào**. Cột `business_code` được định nghĩa là `VARCHAR(50) UNIQUE NOT NULL`. Dữ liệu mới sinh ra từ sequence (ví dụ: `ORIG_00000001`) không có nguy cơ trùng lặp với định dạng cũ (ví dụ: `ORIG_A1B2C3D4`) nhờ cấu trúc số có đệm `0` khác biệt hoàn toàn với mã hex ngẫu nhiên. Mọi truy vấn nghiệp vụ tìm kiếm, chia sẻ và liên kết (alias) dựa trên so khớp chuỗi bằng nhau (equality check) vẫn hoạt động hoàn toàn bình thường trên cả hai định dạng.
+
+### 8.4. Test Impact (Ảnh hưởng đến bộ kiểm thử)
+Sự thay đổi về mặt kiến trúc và interface sẽ làm hỏng một số bài test cũ của Week 1. Cần thực hiện các cập nhật sau:
+
+1. **`DocumentControllerTest` (Update Mock & Test Case mới)**:
+   - Các mock của `DocumentService` cần điều chỉnh để trả về DTO `DocumentResponse` có chứa cờ `duplicated` (`true` hoặc `false`).
+   - Bổ sung test case kiểm thử phản hồi HTTP 429 Too Many Requests khi tải lên bị chặn do xung đột đồng thời và HTTP 200 OK kèm cờ `duplicated: true` khi tải lên tệp trùng trong phòng ban.
+2. **`DocumentServiceTest` (Tái thiết kế & Mock mới)**:
+   - Vì `DocumentServiceImpl` không còn tương tác trực tiếp với `StorageService` cũ và cách sinh UUID cũ, các Mock cũ cho `StorageService.storeFile` phải được loại bỏ.
+   - Thiết lập Mock cho các thành phần mới: `DocumentUploadCoordinator`, `DocumentAdvisoryLockHandler`, `DocumentDeduplicationHelper`.
+   - Viết các test case mô phỏng luồng xử lý 2 pha: acquire lock thành công -> insert -> unlock; hoặc acquire lock thất bại -> retry -> ném timeout; hoặc Double-check phát hiện trùng -> hủy file tạm.
+3. **`StorageServiceTest` / `FileStorageServiceTest` (Thêm mới)**:
+   - Viết bộ kiểm thử unit test mới cho `FileStorageServiceImpl` để đảm bảo:
+     - Ghi stream tệp tạm đúng vị trí và tính toán hash SHA-256 chính xác.
+     - Di chuyển tệp nguyên tử (atomic rename) hoạt động đúng và bắt được `FileAlreadyExistsException`.
+     - Phương thức xóa tệp tạm yên lặng (`deleteTempFileQuietly`) dọn dẹp đúng tệp tin.
+4. **Integration Test (AliasIntegrationTest) (Rewrite & Bổ sung)**:
+   - Cần cập nhật cơ chế khởi tạo môi trường test để tự động chạy Flyway migration `V10` nhằm tạo sequence trong CSDL.
+   - Bổ sung các integration test đa luồng (multi-threaded concurrent tests) sử dụng `ExecutorService` để giả lập nhiều thread cùng upload một tệp tin đồng thời, nhằm chứng minh tính đúng đắn của Advisory Lock và tính năng chống trùng lặp (SIS) hoạt động hoàn hảo dưới tải thực tế.
+
+### 8.5. Files Need To Change Checklist (Danh sách kiểm tra các tệp thay đổi)
+Dưới đây là danh sách các tệp tin chính cần được sửa đổi hoặc tạo mới trong Week 2 để hoàn thiện thiết kế:
+
+* **Các tệp sửa đổi (`[MODIFY]`)**:
+  - [DocumentServiceImpl.java]: Điều chỉnh sang vai trò Orchestrator, tích hợp TransactionTemplate, Advisory Lock, và các check helper.
+  - [DocumentResponse.java]: Thêm trường `boolean duplicated` vào DTO trả về.
+  - [DocumentController.java]: Điều chỉnh logic trả về HTTP status 201 hoặc 200 dựa trên cờ `duplicated`, xử lý ngoại lệ timeout để trả về 429.
+  - [DocumentControllerTest.java]: Cập nhật mocks và bổ sung test cases.
+  - [DocumentServiceTest.java]: Viết lại để phản ánh cấu trúc mock mới.
+* **Các tệp tạo mới (`[NEW]`)**:
+  - `com.vccorp.eap.service.storage.FileStorageService`: Interface quản lý I/O vật lý mới.
+  - `com.vccorp.eap.service.storage.impl.FileStorageServiceImpl`: Triển khai FileStorageService với cơ chế 1-pass stream hash và atomic rename.
+  - `com.vccorp.eap.service.lock.DocumentAdvisoryLockHandler`: Quản lý việc acquire/release khóa cố vấn PostgreSQL.
+  - `com.vccorp.eap.service.helper.DocumentDeduplicationHelper`: Thực thi truy vấn gộp Query 2 (Aggregate Fast-Check/Double-Check).
+  - `com.vccorp.eap.service.coordinator.DocumentUploadCoordinator`: Thành phần điều phối tải lên.
+  - `com.vccorp.eap.service.validation.FileValidationService`: Validate dung lượng, định dạng và magic bytes.
+  - `com.vccorp.eap.service.allocator.BusinessCodeAllocator`: Sinh mã nghiệp vụ bằng sequence.
+  - `com.vccorp.eap.common.exception.ConcurrentUploadTimeoutException`: Ngoại lệ khi không lấy được khóa cố vấn sau 10s.
+  - [V10__add_business_code_sequence.sql]: Khởi tạo sequence `doc_business_code_seq` trong PostgreSQL.

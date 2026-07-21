@@ -9,6 +9,7 @@ services:
       POSTGRES_DB: vcc_eap
       POSTGRES_USER: vcc_admin
       POSTGRES_PASSWORD: secure_db_password
+    command: postgres -c max_connections=50 -c timezone=Asia/Ho_Chi_Minh
     ports:
       - "5432:5432"
     volumes:

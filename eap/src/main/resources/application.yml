@@ -1,9 +1,21 @@
 spring:
   datasource:
-    url: ${DB_URL:jdbc:postgresql://localhost:5432/vcc_eap}
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/vcc_eap?currentSchema=public&stringtype=unspecified&connectTimeout=10&socketTimeout=30&tcpKeepAlive=true&reWriteBatchedInserts=true}
     username: ${DB_USERNAME:vcc_admin}
     password: ${DB_PASSWORD:secure_db_password}
     driver-class-name: org.postgresql.Driver
+    hikari:
+      pool-name: EAP-Hikari-Pool
+      maximum-pool-size: 50
+      minimum-idle: 10
+      idle-timeout: 30000
+      max-lifetime: 1800000
+      keepalive-time: 30000
+      connection-timeout: 5000
+      validation-timeout: 3000
+      initialization-fail-timeout: 2000
+      auto-commit: true
+      register-mbeans: true
   data:
     redis:
       host: ${REDIS_HOST:localhost}
@@ -24,7 +36,10 @@ spring:
         format_sql: true
   flyway:
     enabled: true
+    locations: classpath:db/migration
+    validate-on-migrate: true
     baseline-on-migrate: true
+    clean-disabled: true
   servlet:
     multipart:
       max-file-size: 50MB
@@ -39,3 +54,13 @@ jwt:
 eap:
   upload:
     dir: ./eap-storage
+    temp-dir: ./eap-storage/tmp
+
+logging:
+  level:
+    root: INFO
+    com.vccorp.eap: INFO
+    com.vccorp.eap.service.lock: DEBUG
+    com.vccorp.eap.service.storage: DEBUG
+    com.zaxxer.hikari: INFO
+    org.flywaydb: INFO
