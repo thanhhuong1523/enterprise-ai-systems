@@ -274,6 +274,7 @@ sequenceDiagram
         Service-->>API: Trả về Metadata cũ + cờ duplicated=true
         API-->>UserB: 200 OK (duplicated: true)
     end
+```
 ### 4.4. Sơ đồ Hoạt động Chi tiết (Mermaid Activity Diagram)
 
 Below is the formal Activity Diagram describing the control flow of the two-phase upload process:
