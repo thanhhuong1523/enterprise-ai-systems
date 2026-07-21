@@ -44,9 +44,9 @@ Trong thực tế, khi mạng của văn phòng bị chậm, nhân viên và ban
 *   **Nhân viên**: Tải lên và xem tài liệu thuộc phòng ban của mình.
 *   **Quản lý phòng ban**: Tải lên, xem và xóa tài liệu thuộc phòng ban của mình.
 *   **Ban Giám Đốc (Board)**:
-    *   Có quyền xem tài liệu của tất cả các phòng ban trong hệ thống (chỉ đọc).
-    *   Có quyền tải lên tài liệu thuộc sở hữu của văn phòng Ban Giám Đốc.
-    *   **Quy tắc đặc biệt**: Ban Giám Đốc không được phép chia sẻ tài liệu của mình ra bên ngoài phòng ban và các phòng ban khác không được phép chia sẻ tài liệu cho Ban Giám Đốc.
+    *   Chỉ được phép xem và quản lý tài liệu nội bộ thuộc sở hữu của phòng Ban Giám Đốc. Không được xem tài liệu của các phòng ban khác.
+    *   Tài liệu của Ban Giám Đốc là tuyệt mật, cấm truyền/chia sẻ ra bên ngoài phòng ban dưới mọi hình thức (cấm tạo Alias).
+    *   Các phòng ban nghiệp vụ khác được phép tạo Alias chia sẻ cho nhau, nhưng nghiêm cấm tạo Alias chia sẻ tài liệu cho phòng Ban Giám Đốc.
 
 ---
 
@@ -135,6 +135,8 @@ Trong thực tế, khi mạng của văn phòng bị chậm, nhân viên và ban
 *   **BR-3: Ràng buộc trạng thái tài liệu**: Chỉ kiểm tra trùng lặp với các tài liệu đang ở trạng thái hoạt động (chưa bị xóa mềm). Nếu tài liệu đã bị xóa trước đó, người dùng được quyền tải lên lại tệp tin đó như một tài liệu mới.
 *   **BR-4: Bảo toàn tệp vật lý trên đĩa**: File vật lý được xem là còn tồn tại trên đĩa nếu có ít nhất một bản ghi siêu dữ liệu (của bất kỳ phòng ban nào) từng liên kết tới nó, không phân biệt trạng thái xóa của bản ghi đó.
 *   **BR-5: Nhất quán liên kết vật lý**: Mọi tài liệu có cùng mã định danh nội dung tệp bắt buộc phải trỏ tới cùng một tệp vật lý duy nhất trên đĩa. Khi hệ thống tìm thấy nhiều liên kết cũ, hệ thống luôn chọn liên kết của bản ghi được tạo sớm nhất để đảm bảo tính nhất quán.
+*   **BR-6: Xử lý tiêu đề khi tải lên trùng lặp**: Khi nhận yêu cầu tải lên tệp tin bị trùng lặp trong cùng phòng ban, hệ thống giữ nguyên tiêu đề và siêu dữ liệu của bản ghi tài liệu cũ hiện tại. Tiêu đề mới truyền vào trong request trùng lặp sẽ bị bỏ qua, hệ thống trả về thông báo tệp tin đã tồn tại kèm siêu dữ liệu bản ghi cũ (`duplicated: true`).
+*   **BR-7: Lưu trữ vật lý tài liệu phòng BOARD**: Tài liệu thuộc phòng Ban Giám Đốc (BOARD) được lưu trữ vật lý trên đĩa `/eap-storage/` theo cơ chế chuẩn hóa của hệ thống. Cơ chế chống trùng lặp vật lý (SIS) hoạt động ở tầng đĩa nhị phân, nhưng siêu dữ liệu và ranh giới truy vấn của phòng BOARD được bảo vệ tuyệt đối qua Hibernate Filter.
 
 ---
 

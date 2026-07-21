@@ -7,8 +7,8 @@ import { check, sleep, group } from 'k6';
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:8080';
 
 // Tài khoản người dùng thuộc Phòng ban A và Phòng ban B
-const USER_A = { username: __ENV.USERNAME_A || 'employeeA', password: __ENV.PASSWORD_A || '123456' };
-const USER_B = { username: __ENV.USERNAME_B || 'employeeB', password: __ENV.PASSWORD_B || '123456' };
+const USER_A = { username: __ENV.USERNAME_A || 'user1', password: __ENV.PASSWORD_A || '123456' };
+const USER_B = { username: __ENV.USERNAME_B || 'user2', password: __ENV.PASSWORD_B || '123456' };
 
 // ===============================
 // Đọc file upload
@@ -16,7 +16,7 @@ const USER_B = { username: __ENV.USERNAME_B || 'employeeB', password: __ENV.PASS
 const pdfData = open('./test_file.pdf', 'b');
 
 // ===============================
-// Hàm tiện ích
+// Hàm tiện ích (Hỗ trợ ApiResponse Envelope)
 // ===============================
 function login(username, password) {
   const loginRes = http.post(
@@ -33,7 +33,8 @@ function login(username, password) {
     throw new Error(`Đăng nhập thất bại [${username}]. Status = ${loginRes.status}`);
   }
 
-  const token = loginRes.json().accessToken;
+  const resBody = loginRes.json();
+  const token = (resBody.data && resBody.data.accessToken) ? resBody.data.accessToken : resBody.accessToken;
   if (!token) {
     throw new Error(`Không lấy được accessToken từ API đăng nhập [${username}]`);
   }
@@ -60,8 +61,14 @@ function softDeleteDocument(token, documentId) {
   );
 }
 
+// Trích xuất payload thực từ ApiResponse envelope
+function extractData(r) {
+  const body = r.json();
+  return (body && body.data) ? body.data : body;
+}
+
 // ===============================
-// setup() – Chạy 1 lần trước tất cả VU
+// setup() – Chạy 1 lần trước tất cả VU để đăng nhập lấy Token động
 // ===============================
 export function setup() {
   const tokenA = login(USER_A.username, USER_A.password);
@@ -75,7 +82,8 @@ export function setup() {
 
   let existingDocId = null;
   if (firstUpload.status === 201 || firstUpload.status === 200) {
-    existingDocId = firstUpload.json().id;
+    const docData = extractData(firstUpload);
+    existingDocId = docData.id;
   }
 
   return {
@@ -135,23 +143,22 @@ export function testConcurrentDuplicateUpload(data) {
     '[S1] Không có lỗi 500': (r) => r.status !== 500,
     '[S1] Không timeout (408/504)': (r) => r.status !== 408 && r.status !== 504,
     '[S1] Không quá tải (429)': (r) => {
-      // 429 chấp nhận được nhưng cần ghi nhận để giám sát connection pool
       if (r.status === 429) {
         console.warn(`[S1] Connection pool starvation detected: ${r.body}`);
       }
       return true;
     },
     '[S1] Cờ duplicated đúng': (r) => {
-      if (r.status === 429) return true; // Skip nếu bị throttle
-      const body = r.json();
-      if (r.status === 201) return body.duplicated === false;
-      if (r.status === 200) return body.duplicated === true;
+      if (r.status === 429) return true;
+      const docData = extractData(r);
+      if (r.status === 201) return docData.duplicated === false;
+      if (r.status === 200) return docData.duplicated === true;
       return false;
     },
     '[S1] Metadata hợp lệ': (r) => {
       if (r.status === 429) return true;
-      const body = r.json();
-      return body.id != null && body.businessCode != null && body.hash != null;
+      const docData = extractData(r);
+      return docData.id != null && docData.businessCode != null && docData.hash != null;
     },
   });
 
@@ -170,15 +177,16 @@ export function testCrossDepartmentUpload(data) {
     check(res, {
       '[S2] HTTP 201 (Phòng ban B tạo bản ghi mới)': (r) => r.status === 201,
       '[S2] duplicated = false (Phòng ban B không thấy là trùng)': (r) => {
-        return r.json().duplicated === false;
+        const docData = extractData(r);
+        return docData.duplicated === false;
       },
       '[S2] ownerDepartmentId là của Phòng ban B': (r) => {
-        const body = r.json();
-        return body.ownerDepartmentId != null;
+        const docData = extractData(r);
+        return docData.ownerDepartmentId != null;
       },
       '[S2] Metadata hợp lệ': (r) => {
-        const body = r.json();
-        return body.id != null && body.hash != null;
+        const docData = extractData(r);
+        return docData.id != null && docData.hash != null;
       },
     });
   });
@@ -193,7 +201,6 @@ export function testCrossDepartmentUpload(data) {
 // ===============================
 export function testReuploadAfterSoftDelete(data) {
   group('Reupload after soft delete', () => {
-    // Bước 1: Soft delete tài liệu đã có
     if (!data.existingDocId) {
       console.warn('[S3] Không tìm được existingDocId từ setup(), bỏ qua kịch bản này.');
       return;
@@ -206,15 +213,16 @@ export function testReuploadAfterSoftDelete(data) {
 
     sleep(0.5);
 
-    // Bước 2: Upload lại cùng nội dung file sau khi đã xóa mềm
     const reuploadRes = uploadFile(data.tokenA, 'Báo cáo Tài chính Q2 - Tải lại sau xóa mềm');
     check(reuploadRes, {
       '[S3] Tải lên lại thành công (201)': (r) => r.status === 201,
       '[S3] duplicated = false (Bản ghi cũ đã bị xóa mềm)': (r) => {
-        return r.json().duplicated === false;
+        const docData = extractData(reuploadRes);
+        return docData.duplicated === false;
       },
       '[S3] Tạo được bản ghi mới (ID khác bản ghi cũ)': (r) => {
-        return r.json().id !== data.existingDocId;
+        const docData = extractData(reuploadRes);
+        return docData.id !== data.existingDocId;
       },
     });
   });
