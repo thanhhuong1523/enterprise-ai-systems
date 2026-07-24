@@ -6,7 +6,11 @@ import com.vccorp.eap.model.User;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 
-public class SecurityContextHelper {
+public final class SecurityContextHelper {
+
+    private SecurityContextHelper() {
+        throw new UnsupportedOperationException("Utility class");
+    }
 
     public static User getCurrentUser() {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();

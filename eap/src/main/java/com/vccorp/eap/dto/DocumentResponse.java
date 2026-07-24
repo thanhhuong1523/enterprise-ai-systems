@@ -3,6 +3,12 @@ package com.vccorp.eap.dto;
 import java.time.LocalDateTime;
 import java.util.UUID;
 
+/**
+ * DTO phản hồi cho tài liệu gốc và alias.
+ * Trường {@code duplicated} được thêm ở Week 2 (DetailedDesign §3.2):
+ * - false: tải lên thành công tệp mới → HTTP 201 Created
+ * - true:  phát hiện tệp trùng lặp trong phòng ban → HTTP 200 OK
+ */
 public record DocumentResponse(
     UUID id,
     String businessCode,
@@ -94,7 +100,7 @@ public record DocumentResponse(
 
         public DocumentResponse build() {
             return new DocumentResponse(
-                id, businessCode, title, fileSize, hash, ownerDepartmentId, 
+                id, businessCode, title, fileSize, hash, ownerDepartmentId,
                 parentId, creatorDepartmentId, createdBy, createdAt, updatedAt
             );
         }

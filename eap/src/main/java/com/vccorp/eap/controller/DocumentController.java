@@ -29,13 +29,12 @@ public class DocumentController {
     }
 
     @PostMapping(value = "/original-documents", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    @ResponseStatus(HttpStatus.CREATED)
-    public ApiResponse<DocumentResponse> uploadOriginalDocument(
+    public ResponseEntity<ApiResponse<DocumentResponse>> uploadOriginalDocument(
             @RequestParam("title") String title,
             @RequestParam("file") MultipartFile file) {
         User currentUser = SecurityContextHelper.getCurrentUser();
         DocumentResponse document = documentService.uploadOriginalDocument(title, file, currentUser);
-        return ApiResponse.success(document);
+        return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.success(document));
     }
 
     @GetMapping("/original-documents")

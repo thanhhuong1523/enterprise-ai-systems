@@ -25,7 +25,7 @@ public interface DocumentRepository extends JpaRepository<Document, UUID> {
 
     boolean existsByOwnerDepartmentIdAndDeletedAtIsNull(UUID ownerDepartmentId);
 
-    @Modifying
+    @Modifying(clearAutomatically = true)
     @Query("UPDATE Document d SET d.deletedAt = :deletedAt WHERE d.parentId = :parentId AND d.deletedAt IS NULL")
     void softDeleteAliasesByOriginalId(@Param("parentId") UUID parentId, @Param("deletedAt") LocalDateTime deletedAt);
 

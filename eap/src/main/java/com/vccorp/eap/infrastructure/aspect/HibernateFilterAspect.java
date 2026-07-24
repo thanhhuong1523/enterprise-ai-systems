@@ -25,7 +25,7 @@ public class HibernateFilterAspect {
                 session.enableFilter("deptIsolationFilter")
                        .setParameter("userDeptId", currentUser.getDepartmentId());
             }
-        } catch (Exception e) {
+        } catch (RuntimeException e) {
             // Ignore if not authenticated or no department context (e.g. SYSTEM_ADMIN or startup scripts)
         }
     }

@@ -84,7 +84,7 @@ public class AuthServiceImpl implements AuthService {
         }
 
         RefreshTokenService.TokenRotationResult result = refreshTokenService.rotateRefreshToken(refreshToken, userAgent, ip);
-        User user = result.getUser();
+        User user = result.user();
 
         LoginResponse.UserInfo userInfo = LoginResponse.UserInfo.builder(
                         user.getId(),
@@ -98,10 +98,10 @@ public class AuthServiceImpl implements AuthService {
                 .build();
 
         return LoginResponse.builder(
-                    result.getAccessToken(),
+                    result.accessToken(),
                     "Bearer",
                     900,
-                    result.getRefreshToken(),
+                    result.refreshToken(),
                     604800,
                     userInfo
                 )

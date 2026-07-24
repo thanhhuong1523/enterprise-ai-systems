@@ -1,5 +1,6 @@
 package com.vccorp.eap.service;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.vccorp.eap.common.error.ErrorCode;
 import com.vccorp.eap.common.exception.BusinessException;
@@ -102,7 +103,7 @@ public class RefreshTokenService {
             String json = objectMapper.writeValueAsString(metadata);
             String redisKey = getRedisKey(user.getId().toString(), tokenId);
             redisService.set(redisKey, json, jwtService.getRefreshExpirationMs());
-        } catch (Exception e) {
+        } catch (JsonProcessingException e) {
             throw new BusinessException(ErrorCode.ERR_SYSTEM_ERROR, "Không thể lưu thông tin phiên làm việc.");
         }
 
@@ -114,7 +115,7 @@ public class RefreshTokenService {
         Claims claims;
         try {
             claims = jwtService.parseToken(refreshToken);
-        } catch (Exception e) {
+        } catch (io.jsonwebtoken.JwtException | IllegalArgumentException e) {
             throw new BusinessException(ErrorCode.ERR_UNAUTHENTICATED, "Refresh Token không hợp lệ hoặc đã hết hạn.");
         }
 
@@ -159,7 +160,7 @@ public class RefreshTokenService {
             String json = objectMapper.writeValueAsString(metadata);
             String newRedisKey = getRedisKey(userIdStr, newTokenId);
             redisService.set(newRedisKey, json, jwtService.getRefreshExpirationMs());
-        } catch (Exception e) {
+        } catch (JsonProcessingException e) {
             throw new BusinessException(ErrorCode.ERR_SYSTEM_ERROR, "Không thể lưu thông tin phiên làm việc mới.");
         }
 
@@ -174,7 +175,7 @@ public class RefreshTokenService {
             if (userIdStr != null && tokenId != null) {
                 redisService.delete(getRedisKey(userIdStr, tokenId));
             }
-        } catch (Exception e) {
+        } catch (io.jsonwebtoken.JwtException | IllegalArgumentException e) {
             // If already expired/invalid, do nothing
         }
     }
@@ -187,9 +188,5 @@ public class RefreshTokenService {
         String accessToken,
         String refreshToken,
         User user
-    ) {
-        public String getAccessToken() { return accessToken; }
-        public String getRefreshToken() { return refreshToken; }
-        public User getUser() { return user; }
-    }
+    ) {}
 }

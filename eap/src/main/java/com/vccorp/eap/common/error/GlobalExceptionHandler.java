@@ -1,12 +1,14 @@
 package com.vccorp.eap.common.error;
 
 import com.vccorp.eap.common.exception.BusinessException;
+import com.vccorp.eap.common.exception.ConcurrentUploadTimeoutException;
 import com.vccorp.eap.common.response.ApiResponse;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import java.sql.SQLTransientConnectionException;
 import java.util.Map;
 
 @RestControllerAdvice
@@ -66,6 +68,28 @@ public class GlobalExceptionHandler {
                         (existing, replacement) -> existing
                 ));
         ApiResponse<Void> response = ApiResponse.error(errorCode.name(), "Dữ liệu không hợp lệ.", errors);
+        return new ResponseEntity<>(response, errorCode.getHttpStatus());
+    }
+
+    /**
+     * §6.3: Advisory lock không lấy được sau tối đa 2 giây (5 retries).
+     * Trả về HTTP 429 với errorCode ERR_CONCURRENT_UPLOAD.
+     */
+    @ExceptionHandler(ConcurrentUploadTimeoutException.class)
+    public ResponseEntity<ApiResponse<Void>> handleConcurrentUploadTimeout(ConcurrentUploadTimeoutException ex) {
+        ErrorCode errorCode = ErrorCode.ERR_CONCURRENT_UPLOAD;
+        ApiResponse<Void> response = ApiResponse.error(errorCode.name(), ex.getMessage());
+        return new ResponseEntity<>(response, errorCode.getHttpStatus());
+    }
+
+    /**
+     * §6.1: HikariCP connection pool cạn kiệt khi stress test (>110 concurrent requests).
+     * Trả về HTTP 429 với errorCode ERR_CONCURRENT_UPLOAD thay vì HTTP 500.
+     */
+    @ExceptionHandler(SQLTransientConnectionException.class)
+    public ResponseEntity<ApiResponse<Void>> handleConnectionPoolExhausted(SQLTransientConnectionException ex) {
+        ErrorCode errorCode = ErrorCode.ERR_CONCURRENT_UPLOAD;
+        ApiResponse<Void> response = ApiResponse.error(errorCode.name(), errorCode.getDefaultMessage());
         return new ResponseEntity<>(response, errorCode.getHttpStatus());
     }
 

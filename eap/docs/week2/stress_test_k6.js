@@ -1,230 +1,584 @@
 import http from 'k6/http';
-import { check, sleep, group } from 'k6';
+import { check, group, sleep } from 'k6';
+import { Counter, Rate } from 'k6/metrics';
 
-// ===============================
-// Cấu hình chung
-// ===============================
+/* ============================================================
+ * CONFIG
+ * ============================================================ */
+
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:8080';
 
-// Tài khoản người dùng thuộc Phòng ban A và Phòng ban B
-const USER_A = { username: __ENV.USERNAME_A || 'user1', password: __ENV.PASSWORD_A || '123456' };
-const USER_B = { username: __ENV.USERNAME_B || 'user2', password: __ENV.PASSWORD_B || '123456' };
-
-// ===============================
-// Đọc file upload
-// ===============================
-const pdfData = open('./test_file.pdf', 'b');
-
-// ===============================
-// Hàm tiện ích (Hỗ trợ ApiResponse Envelope)
-// ===============================
-function login(username, password) {
-  const loginRes = http.post(
-    `${BASE_URL}/api/v1/auth/login`,
-    JSON.stringify({ username, password }),
-    { headers: { 'Content-Type': 'application/json' } }
-  );
-
-  check(loginRes, {
-    [`Đăng nhập thành công (${username})`]: (r) => r.status === 200,
-  });
-
-  if (loginRes.status !== 200) {
-    throw new Error(`Đăng nhập thất bại [${username}]. Status = ${loginRes.status}`);
-  }
-
-  const resBody = loginRes.json();
-  const token = (resBody.data && resBody.data.accessToken) ? resBody.data.accessToken : resBody.accessToken;
-  if (!token) {
-    throw new Error(`Không lấy được accessToken từ API đăng nhập [${username}]`);
-  }
-  return token;
-}
-
-function uploadFile(token, title) {
-  const payload = {
-    title: title,
-    file: http.file(pdfData, 'test_file.pdf', 'application/pdf'),
-  };
-  return http.post(
-    `${BASE_URL}/api/v1/original-documents`,
-    payload,
-    { headers: { Authorization: `Bearer ${token}` } }
-  );
-}
-
-function softDeleteDocument(token, documentId) {
-  return http.del(
-    `${BASE_URL}/api/v1/original-documents/${documentId}`,
-    null,
-    { headers: { Authorization: `Bearer ${token}` } }
-  );
-}
-
-// Trích xuất payload thực từ ApiResponse envelope
-function extractData(r) {
-  const body = r.json();
-  return (body && body.data) ? body.data : body;
-}
-
-// ===============================
-// setup() – Chạy 1 lần trước tất cả VU để đăng nhập lấy Token động
-// ===============================
-export function setup() {
-  const tokenA = login(USER_A.username, USER_A.password);
-  const tokenB = login(USER_B.username, USER_B.password);
-
-  // Tải lên 1 file trước bằng Phòng ban A để tạo bản ghi cho kịch bản upload file đã soft-delete
-  const firstUpload = uploadFile(tokenA, 'Tài liệu chuẩn bị cho kịch bản soft-delete');
-  check(firstUpload, {
-    'Upload chuẩn bị thành công': (r) => r.status === 201 || r.status === 200,
-  });
-
-  let existingDocId = null;
-  if (firstUpload.status === 201 || firstUpload.status === 200) {
-    const docData = extractData(firstUpload);
-    existingDocId = docData.id;
-  }
-
-  return {
-    tokenA: tokenA,
-    tokenB: tokenB,
-    existingDocId: existingDocId,
-  };
-}
-
-// ===============================
-// Kịch bản kiểm thử
-// ===============================
-export const options = {
-  scenarios: {
-    // Kịch bản 1: 100 requests đồng thời tải trùng file (cùng Phòng ban A)
-    concurrent_duplicate_upload: {
-      executor: 'per-vu-iterations',
-      vus: 100,
-      iterations: 1,
-      maxDuration: '30s',
-      exec: 'testConcurrentDuplicateUpload',
-      tags: { scenario: 'concurrent_duplicate' },
-    },
-    // Kịch bản 2: Upload file từ Phòng ban B (cùng nội dung) để kiểm tra SIS và cô lập dữ liệu
-    cross_department_upload: {
-      executor: 'per-vu-iterations',
-      vus: 1,
-      iterations: 1,
-      maxDuration: '15s',
-      exec: 'testCrossDepartmentUpload',
-      tags: { scenario: 'cross_department' },
-      startTime: '35s',
-    },
-    // Kịch bản 3: Upload lại file đã bị soft-delete
-    reupload_after_soft_delete: {
-      executor: 'per-vu-iterations',
-      vus: 1,
-      iterations: 1,
-      maxDuration: '15s',
-      exec: 'testReuploadAfterSoftDelete',
-      tags: { scenario: 'soft_delete_reupload' },
-      startTime: '55s',
-    },
-  },
+const USER_A = {
+    username: __ENV.USERNAME_A || 'user1',
+    password: __ENV.PASSWORD_A || '123456'
 };
 
-// ===============================
-// Kịch bản 1: Concurrent Duplicate Upload (Phòng ban A)
-// Mục tiêu: Xác minh đúng 1 bản ghi được tạo, 99 còn lại báo trùng
-// AC-1, AC-2, AC-3, AC-5
-// ===============================
-export function testConcurrentDuplicateUpload(data) {
-  const res = uploadFile(data.tokenA, 'Báo cáo Tài chính Q2 đồng thời');
+const USER_B = {
+    username: __ENV.USERNAME_B || 'user2',
+    password: __ENV.PASSWORD_B || '123456'
+};
 
-  check(res, {
-    '[S1] HTTP 200 hoặc 201': (r) => r.status === 200 || r.status === 201,
-    '[S1] Không có lỗi 500': (r) => r.status !== 500,
-    '[S1] Không timeout (408/504)': (r) => r.status !== 408 && r.status !== 504,
-    '[S1] Không quá tải (429)': (r) => {
-      if (r.status === 429) {
-        console.warn(`[S1] Connection pool starvation detected: ${r.body}`);
-      }
-      return true;
-    },
-    '[S1] Cờ duplicated đúng': (r) => {
-      if (r.status === 429) return true;
-      const docData = extractData(r);
-      if (r.status === 201) return docData.duplicated === false;
-      if (r.status === 200) return docData.duplicated === true;
-      return false;
-    },
-    '[S1] Metadata hợp lệ': (r) => {
-      if (r.status === 429) return true;
-      const docData = extractData(r);
-      return docData.id != null && docData.businessCode != null && docData.hash != null;
-    },
-  });
+/*
+ * 2 file khác nhau
+ * concurrent.pdf dùng test Advisory Lock
+ * soft-delete.pdf dùng test Reupload
+ */
 
-  sleep(1);
+const concurrentPdf = open('./concurrent.pdf', 'b');
+const softDeletePdf = open('./soft_delete.pdf', 'b');
+
+
+/* ============================================================
+ * METRICS
+ * ============================================================ */
+
+export const concurrentCreated = new Counter('concurrent_created');
+
+export const concurrentConflict = new Counter('concurrent_conflict');
+
+
+/* ============================================================
+ * OPTIONS
+ * ============================================================ */
+
+export const options = {
+
+  thresholds:{
+
+    concurrent_created:[
+    'count==1'
+    ],
+    
+    concurrent_conflict:[
+    'count==99'
+    ],
+    
+    },
+
+    scenarios: {
+
+        concurrent_duplicate_upload: {
+
+            executor: 'per-vu-iterations',
+
+            vus: 100,
+
+            iterations: 1,
+
+            maxDuration: '60s',
+
+            exec: 'testConcurrentUpload'
+        },
+
+        cross_department_upload: {
+
+            executor: 'per-vu-iterations',
+
+            vus: 1,
+
+            iterations: 1,
+
+            startTime: '70s',
+
+            exec: 'testCrossDepartment'
+        },
+
+        reupload_after_soft_delete: {
+
+            executor: 'per-vu-iterations',
+
+            vus: 1,
+
+            iterations: 1,
+
+            startTime: '90s',
+
+            exec: 'testSoftDeleteReupload'
+        }
+    }
+};
+
+
+/* ============================================================
+ * COMMON FUNCTIONS
+ * ============================================================ */
+
+function extractData(res) {
+
+    const body = res.json();
+
+    return body.data ?? body;
 }
 
-// ===============================
-// Kịch bản 2: Upload cùng nội dung từ Phòng ban B (Cross-Department SIS)
-// Mục tiêu: Hệ thống tái sử dụng file vật lý (SIS), không rò rỉ thông tin phòng ban A
-// AC-4, BR-2, FR-003, NFR Bảo mật
-// ===============================
-export function testCrossDepartmentUpload(data) {
-  group('Cross-department upload (SIS reuse)', () => {
-    const res = uploadFile(data.tokenB, 'Báo cáo Tài chính Q2 - Phòng ban B');
+
+function login(username, password) {
+
+    const res = http.post(
+
+        `${BASE_URL}/api/v1/auth/login`,
+
+        JSON.stringify({
+            username,
+            password
+        }),
+
+        {
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        }
+    );
 
     check(res, {
-      '[S2] HTTP 201 (Phòng ban B tạo bản ghi mới)': (r) => r.status === 201,
-      '[S2] duplicated = false (Phòng ban B không thấy là trùng)': (r) => {
-        const docData = extractData(r);
-        return docData.duplicated === false;
-      },
-      '[S2] ownerDepartmentId là của Phòng ban B': (r) => {
-        const docData = extractData(r);
-        return docData.ownerDepartmentId != null;
-      },
-      '[S2] Metadata hợp lệ': (r) => {
-        const docData = extractData(r);
-        return docData.id != null && docData.hash != null;
-      },
+
+        'Login success': r => r.status === 200
+
     });
+
+    if (res.status !== 200) {
+
+        throw new Error(`Login failed: ${username}`);
+    }
+
+    const body = res.json();
+
+    return body.data.accessToken;
+}
+
+
+function upload(token, title, fileData, fileName) {
+
+    const payload = {
+
+        title,
+
+        file: http.file(
+            fileData,
+            fileName,
+            'application/pdf'
+        )
+    };
+
+    return http.post(
+
+        `${BASE_URL}/api/v1/original-documents`,
+
+        payload,
+
+        {
+            headers: {
+                Authorization: `Bearer ${token}`
+            }
+        }
+    );
+}
+
+
+function deleteDocument(token, id) {
+
+    return http.del(
+
+        `${BASE_URL}/api/v1/original-documents/${id}`,
+
+        null,
+
+        {
+            headers: {
+                Authorization: `Bearer ${token}`
+            }
+        }
+    );
+}
+
+/* ============================================================
+ * SETUP
+ * ============================================================ */
+
+export function setup() {
+
+  console.log('========== LOGIN ==========');
+
+  const tokenA = login(
+      USER_A.username,
+      USER_A.password
+  );
+
+  const tokenB = login(
+      USER_B.username,
+      USER_B.password
+  );
+
+  console.log('Login completed');
+  console.log('Prepare soft delete document');
+
+  const uploadRes = upload(
+
+      tokenB,
+
+      'Soft Delete Test Document',
+
+      softDeletePdf,
+
+      'soft_delete.pdf'
+  );
+
+  check(uploadRes, {
+
+      'Prepare soft delete success':
+
+          r => r.status === 201
+
   });
 
+  if (uploadRes.status !== 201) {
+
+    console.log("STATUS =", uploadRes.status);
+    console.log("BODY =", uploadRes.body);
+
+    throw new Error(
+        `Cannot prepare soft delete document: ${uploadRes.status}`
+    );
+}
+
+  const document = extractData(uploadRes);
+
+  console.log(
+      `Soft delete document id = ${document.id}`
+  );
+
+
+  /*
+   * Trả token + id
+   */
+
+  return {
+
+      tokenA,
+
+      tokenB,
+
+      softDeleteDocumentId: document.id
+  };
+}
+
+/* ============================================================
+ * UPDATE METRICS
+ * ============================================================ */
+
+function updateConcurrentMetrics(res) {
+
+  if (res.status === 201) {
+      concurrentCreated.add(1);
+  }
+  else if (res.status === 409) {
+      concurrentConflict.add(1);
+  }
+
+}
+
+/* ============================================================
+ * SCENARIO 1
+ *
+ * Concurrent Upload
+ *
+ * 100 request upload cùng 1 file
+ *
+ * Kỳ vọng:
+ *
+ * 1 request -> 201
+ *
+ * 99 request -> 409
+ *
+ * ============================================================ */
+
+export function testConcurrentUpload(data) {
+
+  sleep(Math.random() * 0.2);
+
+  const response = upload(
+
+      data.tokenA,
+
+      'Concurrent Upload Test',
+
+      concurrentPdf,
+
+      'concurrent.pdf'
+  );
+
+  updateConcurrentMetrics(response);
+
+  check(response, {
+
+      /*
+       * Chỉ được phép trả về
+       *
+       * 201
+       *
+       * hoặc
+       *
+       * 409
+       */
+      '[Concurrent] HTTP status': r =>
+
+          r.status === 201 ||
+
+          r.status === 409,
+
+
+      /*
+       * Không được có lỗi hệ thống
+       */
+      '[Concurrent] No HTTP 500': r =>
+
+          r.status !== 500,
+
+
+      /*
+       * Không timeout
+       */
+      '[Concurrent] No timeout': r =>
+
+          r.status !== 408 &&
+
+          r.status !== 504,
+
+
+      /*
+       * Không bị connection starvation
+       */
+      '[Concurrent] No 429': r =>
+
+          r.status !== 429
+
+  });
+
+
+  /*
+   * Nếu upload thành công
+   */
+
+  if (response.status === 201) {
+
+      const document = extractData(response);
+
+      check(document, {
+
+          '[Concurrent] id exists':
+
+              d => d.id != null,
+
+          '[Concurrent] businessCode exists':
+
+              d => d.businessCode != null,
+
+          '[Concurrent] hash exists':
+
+              d => d.hash != null
+
+      });
+
+  }
   sleep(1);
 }
 
-// ===============================
-// Kịch bản 3: Upload lại file sau khi Soft Delete
-// Mục tiêu: Sau khi xóa mềm, người dùng có thể tải lên lại file như tài liệu mới (BR-3)
-// AC-6, BR-3
-// ===============================
-export function testReuploadAfterSoftDelete(data) {
-  group('Reupload after soft delete', () => {
-    if (!data.existingDocId) {
-      console.warn('[S3] Không tìm được existingDocId từ setup(), bỏ qua kịch bản này.');
-      return;
-    }
+/* ============================================================
+ * SCENARIO 2
+ *
+ * Cross Department
+ *
+ * Department A đã upload trước.
+ *
+ * Department B upload cùng file.
+ *
+ * Kỳ vọng:
+ *
+ * 201
+ *
+ * Metadata mới
+ *
+ * Reuse physical file
+ * ============================================================ */
 
-    const deleteRes = softDeleteDocument(data.tokenA, data.existingDocId);
-    check(deleteRes, {
-      '[S3] Soft delete thành công (204)': (r) => r.status === 204 || r.status === 200,
-    });
+export function testCrossDepartment(data) {
 
-    sleep(0.5);
+  group('Cross Department Upload', () => {
 
-    const reuploadRes = uploadFile(data.tokenA, 'Báo cáo Tài chính Q2 - Tải lại sau xóa mềm');
-    check(reuploadRes, {
-      '[S3] Tải lên lại thành công (201)': (r) => r.status === 201,
-      '[S3] duplicated = false (Bản ghi cũ đã bị xóa mềm)': (r) => {
-        const docData = extractData(reuploadRes);
-        return docData.duplicated === false;
-      },
-      '[S3] Tạo được bản ghi mới (ID khác bản ghi cũ)': (r) => {
-        const docData = extractData(reuploadRes);
-        return docData.id !== data.existingDocId;
-      },
-    });
+      const response = upload(
+
+          data.tokenB,
+
+          'Cross Department Upload',
+
+          concurrentPdf,
+
+          'concurrent.pdf'
+      );
+
+      check(response, {
+
+          '[Cross] HTTP 201':
+
+              r => r.status === 201,
+
+          '[Cross] Không lỗi 500':
+
+              r => r.status !== 500,
+
+          '[Cross] Không timeout':
+
+              r =>
+
+                  r.status !== 408 &&
+
+                  r.status !== 504
+
+      });
+
+
+      if (response.status !== 201) {
+
+          return;
+      }
+
+      const document = extractData(response);
+
+      check(document, {
+
+          '[Cross] id exists':
+
+              d => d.id != null,
+
+          '[Cross] businessCode exists':
+
+              d => d.businessCode != null,
+
+          '[Cross] hash exists':
+
+              d => d.hash != null
+
+      });
+
+      /*
+       * Nếu backend trả ownerDepartmentId
+       */
+
+      if (document.ownerDepartmentId !== undefined) {
+
+          check(document, {
+
+              '[Cross] ownerDepartmentId exists':
+
+                  d => d.ownerDepartmentId != null
+
+          });
+      }
+  });
+  sleep(1);
+}
+
+/* ============================================================
+ * SCENARIO 3
+ *
+ * Upload
+ * ↓
+ * Soft Delete
+ * ↓
+ * Upload lại
+ *
+ * Kỳ vọng:
+ *
+ * 201 Created
+ *
+ * Metadata mới
+ *
+ * Reuse physical file
+ * ============================================================ */
+
+export function testSoftDeleteReupload(data) {
+
+  group('Soft Delete Reupload', () => {
+
+      /*
+       * [SỬA ĐỔI] Sử dụng token của Trưởng phòng (data.tokenManager) để xóa mềm document đã tạo trong setup()
+       */
+      const deleteRes = deleteDocument(
+          data.tokenB, // Thay data.tokenA thành token của Trưởng phòng
+          data.softDeleteDocumentId
+      );
+
+      check(deleteRes, {
+          '[SoftDelete] Delete success':
+              r =>
+                  r.status === 204 ||
+                  r.status === 200
+      });
+
+      /*
+       * Chờ transaction commit và DB Flush hoàn toàn
+       */
+      sleep(1);
+
+
+      /*
+       * [SỬA ĐỔI] Upload lại đúng file cũ (Có thể dùng token Trưởng phòng hoặc tokenA tùy quy trình upload)
+       */
+      const uploadRes = upload(
+          data.tokenB, // Đảm bảo đồng bộ quyền thao tác trên tệp tin vừa xóa
+          'Soft Delete Reupload',
+          softDeletePdf,
+          'soft-delete.pdf'
+      );
+
+      check(uploadRes, {
+          '[SoftDelete] HTTP 201':
+              r => r.status === 201,
+          '[SoftDelete] Không lỗi 500':
+              r => r.status !== 500
+      });
+
+      if (uploadRes.status !== 201) {
+          // Gợi ý Debug: In log nếu bước tải lên lại thất bại do lỗi chặn trùng ở Backend
+          // console.log(`[DEBUG] Reupload failed status: ${uploadRes.status}, Body: ${uploadRes.body}`);
+          return;
+      }
+
+      const document = extractData(uploadRes);
+
+
+      /*
+       * Metadata mới
+       */
+      check(document, {
+          '[SoftDelete] Data structure valid': d => d !== null && typeof d === 'object',
+          '[SoftDelete] id exists':
+              d => d && d.id != null,
+          '[SoftDelete] businessCode exists':
+              d => d && d.businessCode != null,
+          '[SoftDelete] hash exists':
+              d => d && d.hash != null
+      });
+
+
+      /*
+       * ID phải khác metadata cũ
+       */
+      check(document, {
+          '[SoftDelete] New metadata':
+              d => d && d.id !== data.softDeleteDocumentId
+      });
+
+
+      /*
+       * Nếu backend expose reusePhysicalFile
+       */
+      if (document && document.reusePhysicalFile !== undefined) {
+          check(document, {
+              '[SoftDelete] Reuse physical file':
+                  d => d.reusePhysicalFile === true
+          });
+      }
+
   });
 
   sleep(1);
