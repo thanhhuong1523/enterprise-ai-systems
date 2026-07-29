@@ -349,216 +349,41 @@ erDiagram
     DOCUMENTS ||--o{ DOCUMENTS : "references (parent_id -> id)"
 ```
 
-### 4.2. Sơ đồ Lớp Hệ thống Chi tiết (Detailed System Class Diagram)
+### 4.2. Sơ đồ Lớp Thực thể CSDL (Database Entity Class Diagram)
 
-Sơ đồ thể hiện toàn bộ các lớp thiết kế trong hệ thống bao gồm các lớp Thực thể (Entities), Controller tiếp nhận API, Service thực thi logic nghiệp vụ, Validator kiểm tra quyền hạn, các interface Repository tương tác dữ liệu và mối liên kết phụ thuộc giữa chúng:
+Sơ đồ thể hiện cấu trúc các thực thể dữ liệu (JPA Entities) ánh xạ trực tiếp tương ứng với các bảng trong cơ sở dữ liệu và mối quan hệ liên kết khoá chính/khoá ngoại giữa chúng:
 
 ```mermaid
 classDiagram
-    %% Tầng Controller (Presentation Layer)
-    class AuthController {
-        -AuthService authService
-        +login(LoginRequest) ApiResponse
-        +refresh(RefreshRequest) ApiResponse
-        +logout(LogoutRequest) ApiResponse
-    }
-    class UserController {
-        -UserService userService
-        +createUser(CreateUserRequest) ApiResponse
-        +listUsers() ApiResponse
-        +getUserDetail(UUID) ApiResponse
-        +updateUser(UUID, UpdateUserRequest) ApiResponse
-        +deleteUser(UUID) ApiResponse
-    }
-    class DepartmentController {
-        -DepartmentService departmentService
-        +createDepartment(CreateDepartmentRequest) ApiResponse
-        +listDepartments() ApiResponse
-        +getDepartmentDetail(UUID) ApiResponse
-        +updateDepartment(UUID, UpdateDepartmentRequest) ApiResponse
-        +deleteDepartment(UUID) ApiResponse
-    }
-    class DocumentController {
-        -DocumentService documentService
-        +uploadOriginalDocument(String, MultipartFile) ApiResponse
-        +listOriginalDocuments(int, int) ApiResponse
-        +listSharedDocuments(int, int) ApiResponse
-        +getOriginalDocumentDetail(UUID) ApiResponse
-        +listDocumentAliases(UUID) ApiResponse
-        +updateOriginalDocument(UUID, UpdateDocumentRequest) ApiResponse
-        +deleteOriginalDocument(UUID) ApiResponse
-        +createAlias(CreateAliasRequest) ApiResponse
-        +deleteAlias(UUID) ApiResponse
-        +resolveAlias(UUID) ResponseEntity
-    }
-
-    %% Tầng Service Interfaces (Business Logic Layer)
-    class AuthService {
-        <<interface>>
-        +login(LoginRequest) LoginResponse
-        +login(LoginRequest, String, String) LoginResponse
-        +refresh(String, String, String) LoginResponse
-        +logout(String) void
-    }
-    class UserService {
-        <<interface>>
-        +createUser(CreateUserRequest) UserResponse
-        +listUsers() List~UserResponse~
-        +getUserDetail(UUID) UserResponse
-        +updateUser(UUID, UpdateUserRequest) UserResponse
-        +deleteUser(UUID) void
-    }
-    class DepartmentService {
-        <<interface>>
-        +createDepartment(CreateDepartmentRequest) DepartmentResponse
-        +listDepartments() List~DepartmentResponse~
-        +getDepartmentDetail(UUID) DepartmentResponse
-        +updateDepartment(UUID, UpdateDepartmentRequest) DepartmentResponse
-        +deleteDepartment(UUID) void
-    }
-    class DocumentService {
-        <<interface>>
-        +uploadOriginalDocument(String, MultipartFile, User) DocumentResponse
-        +listOriginalDocuments(int, int, User) Page~DocumentResponse~
-        +listSharedDocuments(int, int, User) Page~DocumentResponse~
-        +getOriginalDocumentDetail(UUID, User) DocumentResponse
-        +listDocumentAliases(UUID, User) List~DocumentResponse~
-        +updateOriginalDocument(UUID, String, User) DocumentResponse
-        +deleteOriginalDocument(UUID, User) void
-        +createAlias(CreateAliasRequest, User) DocumentResponse
-        +deleteAlias(UUID, User) void
-        +resolveAlias(UUID, User) byte[]
-    }
-    class StorageService {
-        <<interface>>
-        +storeFile(MultipartFile, String) String
-        +loadFile(String) byte[]
-    }
-
-    %% Tầng Service Implementations
-    class AuthServiceImpl {
-        -UserRepository userRepository
-        -PasswordEncoder passwordEncoder
-        -JwtService jwtService
-        -RefreshTokenService refreshTokenService
-    }
-    class UserServiceImpl {
-        -UserRepository userRepository
-        -DepartmentRepository departmentRepository
-        -PasswordEncoder passwordEncoder
-        -RedisService redisService
-    }
-    class DepartmentServiceImpl {
-        -DepartmentRepository departmentRepository
-        -UserRepository userRepository
-        -DocumentRepository documentRepository
-    }
-    class DocumentServiceImpl {
-        -DocumentRepository documentRepository
-        -DepartmentRepository departmentRepository
-        -StorageService storageService
-    }
-    class FileStorageServiceImpl {
-        -String uploadDir
-    }
-
-    %% Tầng Repository Interfaces (Data Access Layer)
-    class UserRepository {
-        <<interface>>
-        +findByUsername(String) Optional~User~
-        +existsByUsernameOrEmail(String, String) boolean
-        +existsByDepartmentId(UUID) boolean
-    }
-    class DepartmentRepository {
-        <<interface>>
-        +existsByCode(String) boolean
-        +existsByName(String) boolean
-    }
-    class DocumentRepository {
-        <<interface>>
-        +findByIdForUpdate(UUID) Optional~Document~
-        +existsByParentIdAndOwnerDepartmentIdAndDeletedAtIsNull(UUID, UUID) boolean
-        +existsByOwnerDepartmentIdAndDeletedAtIsNull(UUID) boolean
-        +softDeleteAliasesByOriginalId(UUID, LocalDateTime) void
-        +findAllByParentIdAndDeletedAtIsNull(UUID) List~Document~
-        +findByParentIdIsNull(Pageable) Page~Document~
-        +findByParentIdIsNullAndOwnerDepartmentId(UUID, Pageable) Page~Document~
-        +findByParentIdIsNotNullAndOwnerDepartmentId(UUID, Pageable) Page~Document~
-        +findOrphanHashes(String[]) List~String~
-    }
-
-    %% Tầng Domain Entities
-    class User {
-        -UUID id
-        -String username
-        -String email
-        -String passwordHash
-        -Role role
-        -UUID departmentId
-        -String fullName
-        -String phone
-        -LocalDateTime createdAt
-        -LocalDateTime updatedAt
-        -LocalDateTime deletedAt
-    }
     class Department {
-        -UUID id
-        -String code
-        -String name
-        -String description
-        -LocalDateTime createdAt
-        -LocalDateTime updatedAt
-        -LocalDateTime deletedAt
-    }
-    class Document {
-        -UUID id
-        -String businessCode
-        -String title
-        -String fileReference
-        -Long fileSize
-        -String hash
-        -UUID ownerDepartmentId
-        -UUID parentId
-        -UUID creatorDepartmentId
-        -UUID createdBy
-        -LocalDateTime createdAt
-        -LocalDateTime updatedAt
-        -LocalDateTime deletedAt
-        +isAlias() boolean
-        +isOriginal() boolean
-    }
-    class Role {
-        <<enumeration>>
-        SYSTEM_ADMIN
-        ROLE_BOARD
-        ROLE_DEPT_MANAGER
-        ROLE_EMPLOYEE
-    }
-
-    %% Tầng Data Transfer Objects (DTOs)
-    class UserResponse {
-        +UUID id
-        +String username
-        +String email
-        +Role role
-        +UUID departmentId
-        +String fullName
-        +String phone
-        +LocalDateTime createdAt
-        +LocalDateTime updatedAt
-    }
-    class DepartmentResponse {
         +UUID id
         +String code
         +String name
         +String description
         +LocalDateTime createdAt
         +LocalDateTime updatedAt
+        +LocalDateTime deletedAt
     }
-    class DocumentResponse {
+
+    class User {
+        +UUID id
+        +String username
+        +String email
+        +String passwordHash
+        +Role role
+        +UUID departmentId
+        +String fullName
+        +String phone
+        +LocalDateTime createdAt
+        +LocalDateTime updatedAt
+        +LocalDateTime deletedAt
+    }
+
+    class Document {
         +UUID id
         +String businessCode
         +String title
+        +String fileReference
         +Long fileSize
         +String hash
         +UUID ownerDepartmentId
@@ -567,40 +392,25 @@ classDiagram
         +UUID createdBy
         +LocalDateTime createdAt
         +LocalDateTime updatedAt
+        +LocalDateTime deletedAt
         +isAlias() boolean
         +isOriginal() boolean
     }
 
-    %% Relationships - Inheritance & Implementation
-    AuthService <|.. AuthServiceImpl
-    UserService <|.. UserServiceImpl
-    DepartmentService <|.. DepartmentServiceImpl
-    DocumentService <|.. DocumentServiceImpl
-    StorageService <|.. FileStorageServiceImpl
+    class Role {
+        <<enumeration>>
+        SYSTEM_ADMIN
+        ROLE_BOARD
+        ROLE_DEPT_MANAGER
+        ROLE_EMPLOYEE
+    }
 
-    %% Relationships - Dependency Injection & Dependency
-    AuthController --> AuthService
-    UserController --> UserService
-    DepartmentController --> DepartmentService
-    DocumentController --> DocumentService
-
-    AuthServiceImpl --> UserRepository
-    UserServiceImpl --> UserRepository
-    UserServiceImpl --> DepartmentRepository
-    DepartmentServiceImpl --> DepartmentRepository
-    DepartmentServiceImpl --> UserRepository
-    DepartmentServiceImpl --> DocumentRepository
-    DocumentServiceImpl --> DocumentRepository
-    DocumentServiceImpl --> DepartmentRepository
-    DocumentServiceImpl --> StorageService
-
-    %% Relationships - JPA Entities to Enums & Associations
-    User --> Role : has role
-    User --> Department : belongs to
-    Document --> Department : owned by (ownerDepartmentId)
-    Document --> Department : shared by (creatorDepartmentId)
-    Document --> User : created by
-    Document --> Document : references parent
+    Department "1" --o "*" User : "has (department_id)"
+    Department "1" --o "*" Document : "owns (owner_department_id)"
+    Department "1" --o "*" Document : "created alias (creator_department_id)"
+    User "1" --o "*" Document : "creates (created_by)"
+    Document "0..1" <-- "*" Document : "references original (parent_id)"
+    User "*" --> "1" Role : "has role"
 ```
 
 ---
@@ -944,215 +754,40 @@ sequenceDiagram
 ---
 ## 8. Thiết kế Tầng Truy cập Dữ liệu & Nghiệp vụ (Repository & Service Design)
 
-### 8.1. Thiết kế Lớp Tầng Service và Repository (Class Diagram)
-Sơ đồ lớp dưới đây mô tả mối quan hệ, các phương thức và kiểu dữ liệu trao đổi giữa các lớp:
+### 8.1. Thiết kế Lớp Thực thể CSDL và Mối liên kết Bảng (Entity Class Diagram)
+Sơ đồ lớp dưới đây mô tả cấu trúc các thực thể dữ liệu ánh xạ tương ứng với các bảng trong cơ sở dữ liệu và mối quan hệ giữa chúng:
 
 ```mermaid
 classDiagram
-    %% Tầng Controller (Presentation Layer)
-    class AuthController {
-        -AuthService authService
-        +login(LoginRequest) ApiResponse
-        +refresh(RefreshRequest) ApiResponse
-        +logout(LogoutRequest) ApiResponse
-    }
-    class UserController {
-        -UserService userService
-        +createUser(CreateUserRequest) ApiResponse
-        +listUsers() ApiResponse
-        +getUserDetail(UUID) ApiResponse
-        +updateUser(UUID, UpdateUserRequest) ApiResponse
-        +deleteUser(UUID) ApiResponse
-    }
-    class DepartmentController {
-        -DepartmentService departmentService
-        +createDepartment(CreateDepartmentRequest) ApiResponse
-        +listDepartments() ApiResponse
-        +getDepartmentDetail(UUID) ApiResponse
-        +updateDepartment(UUID, UpdateDepartmentRequest) ApiResponse
-        +deleteDepartment(UUID) ApiResponse
-    }
-    class DocumentController {
-        -DocumentService documentService
-        +uploadOriginalDocument(String, MultipartFile) ApiResponse
-        +listOriginalDocuments(int, int) ApiResponse
-        +listSharedDocuments(int, int) ApiResponse
-        +getOriginalDocumentDetail(UUID) ApiResponse
-        +listDocumentAliases(UUID) ApiResponse
-        +updateOriginalDocument(UUID, UpdateDocumentRequest) ApiResponse
-        +deleteOriginalDocument(UUID) ApiResponse
-        +createAlias(CreateAliasRequest) ApiResponse
-        +deleteAlias(UUID) ApiResponse
-        +resolveAlias(UUID) ResponseEntity
-    }
-
-    %% Tầng Service Interfaces (Business Logic Layer)
-    class AuthService {
-        <<interface>>
-        +login(LoginRequest) LoginResponse
-        +login(LoginRequest, String, String) LoginResponse
-        +refresh(String, String, String) LoginResponse
-        +logout(String) void
-    }
-    class UserService {
-        <<interface>>
-        +createUser(CreateUserRequest) UserResponse
-        +listUsers() List~UserResponse~
-        +getUserDetail(UUID) UserResponse
-        +updateUser(UUID, UpdateUserRequest) UserResponse
-        +deleteUser(UUID) void
-    }
-    class DepartmentService {
-        <<interface>>
-        +createDepartment(CreateDepartmentRequest) DepartmentResponse
-        +listDepartments() List~DepartmentResponse~
-        +getDepartmentDetail(UUID) DepartmentResponse
-        +updateDepartment(UUID, UpdateDepartmentRequest) DepartmentResponse
-        +deleteDepartment(UUID) void
-    }
-    class DocumentService {
-        <<interface>>
-        +uploadOriginalDocument(String, MultipartFile, User) DocumentResponse
-        +listOriginalDocuments(int, int, User) Page~DocumentResponse~
-        +listSharedDocuments(int, int, User) Page~DocumentResponse~
-        +getOriginalDocumentDetail(UUID, User) DocumentResponse
-        +listDocumentAliases(UUID, User) List~DocumentResponse~
-        +updateOriginalDocument(UUID, String, User) DocumentResponse
-        +deleteOriginalDocument(UUID, User) void
-        +createAlias(CreateAliasRequest, User) DocumentResponse
-        +deleteAlias(UUID, User) void
-        +resolveAlias(UUID, User) byte[]
-    }
-    class StorageService {
-        <<interface>>
-        +storeFile(MultipartFile, String) String
-        +loadFile(String) byte[]
-    }
-
-    %% Tầng Service Implementations
-    class AuthServiceImpl {
-        -UserRepository userRepository
-        -PasswordEncoder passwordEncoder
-        -JwtService jwtService
-        -RefreshTokenService refreshTokenService
-    }
-    class UserServiceImpl {
-        -UserRepository userRepository
-        -DepartmentRepository departmentRepository
-        -PasswordEncoder passwordEncoder
-        -RedisService redisService
-    }
-    class DepartmentServiceImpl {
-        -DepartmentRepository departmentRepository
-        -UserRepository userRepository
-        -DocumentRepository documentRepository
-    }
-    class DocumentServiceImpl {
-        -DocumentRepository documentRepository
-        -DepartmentRepository departmentRepository
-        -StorageService storageService
-    }
-    class FileStorageServiceImpl {
-        -String uploadDir
-    }
-
-    %% Tầng Repository Interfaces (Data Access Layer)
-    class UserRepository {
-        <<interface>>
-        +findByUsername(String) Optional~User~
-        +existsByUsernameOrEmail(String, String) boolean
-        +existsByDepartmentId(UUID) boolean
-    }
-    class DepartmentRepository {
-        <<interface>>
-        +existsByCode(String) boolean
-        +existsByName(String) boolean
-    }
-    class DocumentRepository {
-        <<interface>>
-        +findByIdForUpdate(UUID) Optional~Document~
-        +existsByParentIdAndOwnerDepartmentIdAndDeletedAtIsNull(UUID, UUID) boolean
-        +existsByOwnerDepartmentIdAndDeletedAtIsNull(UUID) boolean
-        +softDeleteAliasesByOriginalId(UUID, LocalDateTime) void
-        +findAllByParentIdAndDeletedAtIsNull(UUID) List~Document~
-        +findByParentIdIsNull(Pageable) Page~Document~
-        +findByParentIdIsNullAndOwnerDepartmentId(UUID, Pageable) Page~Document~
-        +findByParentIdIsNotNullAndOwnerDepartmentId(UUID, Pageable) Page~Document~
-        +findOrphanHashes(String[]) List~String~
-    }
-
-    %% Tầng Domain Entities
-    class User {
-        -UUID id
-        -String username
-        -String email
-        -String passwordHash
-        -Role role
-        -UUID departmentId
-        -String fullName
-        -String phone
-        -LocalDateTime createdAt
-        -LocalDateTime updatedAt
-        -LocalDateTime deletedAt
-    }
     class Department {
-        -UUID id
-        -String code
-        -String name
-        -String description
-        -LocalDateTime createdAt
-        -LocalDateTime updatedAt
-        -LocalDateTime deletedAt
-    }
-    class Document {
-        -UUID id
-        -String businessCode
-        -String title
-        -String fileReference
-        -Long fileSize
-        -String hash
-        -UUID ownerDepartmentId
-        -UUID parentId
-        -UUID creatorDepartmentId
-        -UUID createdBy
-        -LocalDateTime createdAt
-        -LocalDateTime updatedAt
-        -LocalDateTime deletedAt
-        +isAlias() boolean
-        +isOriginal() boolean
-    }
-    class Role {
-        <<enumeration>>
-        SYSTEM_ADMIN
-        ROLE_BOARD
-        ROLE_DEPT_MANAGER
-        ROLE_EMPLOYEE
-    }
-
-    %% Tầng Data Transfer Objects (DTOs)
-    class UserResponse {
-        +UUID id
-        +String username
-        +String email
-        +Role role
-        +UUID departmentId
-        +String fullName
-        +String phone
-        +LocalDateTime createdAt
-        +LocalDateTime updatedAt
-    }
-    class DepartmentResponse {
         +UUID id
         +String code
         +String name
         +String description
         +LocalDateTime createdAt
         +LocalDateTime updatedAt
+        +LocalDateTime deletedAt
     }
-    class DocumentResponse {
+
+    class User {
+        +UUID id
+        +String username
+        +String email
+        +String passwordHash
+        +Role role
+        +UUID departmentId
+        +String fullName
+        +String phone
+        +LocalDateTime createdAt
+        +LocalDateTime updatedAt
+        +LocalDateTime deletedAt
+    }
+
+    class Document {
         +UUID id
         +String businessCode
         +String title
+        +String fileReference
         +Long fileSize
         +String hash
         +UUID ownerDepartmentId
@@ -1161,40 +796,25 @@ classDiagram
         +UUID createdBy
         +LocalDateTime createdAt
         +LocalDateTime updatedAt
+        +LocalDateTime deletedAt
         +isAlias() boolean
         +isOriginal() boolean
     }
 
-    %% Relationships - Inheritance & Implementation
-    AuthService <|.. AuthServiceImpl
-    UserService <|.. UserServiceImpl
-    DepartmentService <|.. DepartmentServiceImpl
-    DocumentService <|.. DocumentServiceImpl
-    StorageService <|.. FileStorageServiceImpl
+    class Role {
+        <<enumeration>>
+        SYSTEM_ADMIN
+        ROLE_BOARD
+        ROLE_DEPT_MANAGER
+        ROLE_EMPLOYEE
+    }
 
-    %% Relationships - Dependency Injection & Dependency
-    AuthController --> AuthService
-    UserController --> UserService
-    DepartmentController --> DepartmentService
-    DocumentController --> DocumentService
-
-    AuthServiceImpl --> UserRepository
-    UserServiceImpl --> UserRepository
-    UserServiceImpl --> DepartmentRepository
-    DepartmentServiceImpl --> DepartmentRepository
-    DepartmentServiceImpl --> UserRepository
-    DepartmentServiceImpl --> DocumentRepository
-    DocumentServiceImpl --> DocumentRepository
-    DocumentServiceImpl --> DepartmentRepository
-    DocumentServiceImpl --> StorageService
-
-    %% Relationships - JPA Entities to Enums & Associations
-    User --> Role : has role
-    User --> Department : belongs to
-    Document --> Department : owned by (ownerDepartmentId)
-    Document --> Department : shared by (creatorDepartmentId)
-    Document --> User : created by
-    Document --> Document : references parent
+    Department "1" --o "*" User : "has (department_id)"
+    Department "1" --o "*" Document : "owns (owner_department_id)"
+    Department "1" --o "*" Document : "created alias (creator_department_id)"
+    User "1" --o "*" Document : "creates (created_by)"
+    Document "0..1" <-- "*" Document : "references original (parent_id)"
+    User "*" --> "1" Role : "has role"
 ```
 
 ### 8.2. Mô tả các Phương thức Nghiệp vụ và Khóa Dữ liệu
