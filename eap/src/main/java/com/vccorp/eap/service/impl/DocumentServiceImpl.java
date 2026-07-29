@@ -25,6 +25,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
@@ -54,8 +55,14 @@ public class DocumentServiceImpl implements DocumentService {
 
     private static final Logger log = LoggerFactory.getLogger(DocumentServiceImpl.class);
 
-    // Retry config cho advisory lock (§4.2, ADR-008)
-    private static final int MAX_LOCK_RETRIES = 5;
+    @Value("${eap.retry.max-attempts:5}")
+    private int maxLockRetries = 5;
+
+    @Value("${eap.retry.base-delay-ms:350}")
+    private long baseDelayMs = 350;
+
+    @Value("${eap.retry.max-delay-ms:2000}")
+    private long maxDelayMs = 2000;
 
     private final DocumentRepository documentRepository;
     private final DepartmentRepository departmentRepository;
@@ -119,7 +126,7 @@ public class DocumentServiceImpl implements DocumentService {
             fastCheckDuplicate(hash, departmentId);
 
             // Bước 5: Pha 2 — Single-Connection TransactionTemplate với retry loop ngoài giao dịch
-            for (int i = 0; i < MAX_LOCK_RETRIES; i++) {
+            for (int i = 0; i < maxLockRetries; i++) {
                 try {
                     UploadTransactionResult txResult = transactionTemplate.execute(status -> {
                         // Thử lấy khóa cố vấn (nếu không lấy được, PostgreSQL sẽ trả về false hoặc ném exception nếu DB lỗi)
@@ -159,11 +166,11 @@ public class DocumentServiceImpl implements DocumentService {
                     // §6.2: Lá chắn cuối — vi phạm UNIQUE constraint bất thường
                     log.warn("UNIQUE constraint violation (last-resort) for hash={}, dept={}", hash, departmentId, e);
 
-                    throw new BusinessException(ErrorCode.ERR_SYSTEM_ERROR, "Lỗi hệ thống khi xử lý tải lên tài liệu.");
+                    throw new BusinessException(ErrorCode.ERR_DUPLICATE_DOCUMENT, "Tài liệu đã tồn tại trong phòng ban.");
                 }
 
                 // Nếu khóa bị bận (Status.LOCK_BUSY), ngủ ngoài giao dịch (không giữ Connection) rồi thử lại
-                if (i < MAX_LOCK_RETRIES - 1) {
+                if (i < maxLockRetries - 1) {
                     sleepWithJitter(i);
                 }
             }
@@ -355,7 +362,11 @@ public class DocumentServiceImpl implements DocumentService {
                 .createdAt(LocalDateTime.now())
                 .build();
 
-        return mapToResponse(documentRepository.save(aliasDoc));
+        try {
+            return mapToResponse(documentRepository.saveAndFlush(aliasDoc));
+        } catch (DataIntegrityViolationException e) {
+            throw new BusinessException(ErrorCode.ERR_DUPLICATE_ALIAS);
+        }
     }
 
     @Override
@@ -471,9 +482,10 @@ public class DocumentServiceImpl implements DocumentService {
 
     private void sleepWithJitter(int retryCount) {
         try {
-            int baseSleep = 350; // ms
-            int jitter = new java.util.Random().nextInt(100);
-            Thread.sleep(((long) baseSleep * (retryCount + 1)) + jitter);
+            long delayTemp = Math.min(maxDelayMs, baseDelayMs * (1L << retryCount));
+            long jitter = new java.util.Random().nextInt(100) - 50; // Jitter +/- 50ms
+            long sleepTime = Math.max(0L, delayTemp + jitter);
+            Thread.sleep(sleepTime);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
@@ -496,8 +508,12 @@ public class DocumentServiceImpl implements DocumentService {
         String oldestFileRef = result.getOldestFileRef();
 
         if (oldestFileRef != null) {
-            log.debug("SIS: reusing physical file={} for hash={}", oldestFileRef, hash);
-            return oldestFileRef;
+            if (fileStorageService.exists(oldestFileRef)) {
+                log.debug("SIS: reusing physical file={} for hash={}", oldestFileRef, hash);
+                return oldestFileRef;
+            } else {
+                log.debug("SIS: physical file={} is missing. Creating new physical file.", oldestFileRef);
+            }
         }
         log.debug("Moving temporary file to permanent storage. hash={}", hash);
 

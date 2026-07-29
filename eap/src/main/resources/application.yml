@@ -55,6 +55,14 @@ eap:
   upload:
     dir: ./eap-storage
     temp-dir: ./eap-storage/tmp
+  retry:
+    max-attempts: ${RETRY_MAX_ATTEMPTS:5}
+    base-delay-ms: ${RETRY_BASE_DELAY_MS:350}
+    max-delay-ms: ${RETRY_MAX_DELAY_MS:2000}
+  cleanup:
+    cron: ${CLEANUP_CRON:0 0 2 * * *}
+    temp-expiration-ms: ${CLEANUP_TEMP_EXPIRATION_MS:86400000} # 24 hours
+    orphan-grace-period-ms: ${CLEANUP_ORPHAN_GRACE_PERIOD_MS:600000} # 10 minutes
 
 logging:
   level:

@@ -95,7 +95,7 @@ export const DepartmentsPage: React.FC = () => {
       setModalMode(null);
       reset();
     } catch (err: any) {
-      showToast(err.response?.data?.message || 'Có lỗi xảy ra, vui lòng thử lại.', 'error');
+      showToast(err.response?.data?.error?.message || err.response?.data?.message || 'Có lỗi xảy ra, vui lòng thử lại.', 'error');
     }
   };
 
@@ -105,7 +105,7 @@ export const DepartmentsPage: React.FC = () => {
         await deleteDepartment(selectedDept.id);
         showToast('Đã xóa mềm phòng ban thành công.', 'success');
       } catch (err: any) {
-        showToast(err.response?.data?.message || 'Không thể xóa phòng ban.', 'error');
+        showToast(err.response?.data?.error?.message || err.response?.data?.message || 'Không thể xóa phòng ban.', 'error');
       } finally {
         setModalMode(null);
       }

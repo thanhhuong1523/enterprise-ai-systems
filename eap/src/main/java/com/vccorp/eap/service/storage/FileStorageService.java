@@ -50,4 +50,12 @@ public interface FileStorageService {
      * @throws IOException nếu tệp không tồn tại hoặc lỗi đọc
      */
     byte[] loadFile(String fileReference) throws IOException;
+
+    /**
+     * Kiểm tra sự tồn tại thực tế của tệp tin tại đường dẫn được chỉ định trên đĩa.
+     *
+     * @param fileReference đường dẫn tệp
+     * @return true nếu tệp tồn tại, ngược lại false
+     */
+    boolean exists(String fileReference);
 }

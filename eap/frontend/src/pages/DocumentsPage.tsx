@@ -121,7 +121,7 @@ export const DocumentsPage: React.FC = () => {
       setModalMode(null);
       resetUpload();
     } catch (err: any) {
-      showToast(err.response?.data?.message || 'Có lỗi xảy ra khi tải lên tài liệu.', 'error');
+      showToast(err.response?.data?.error?.message || err.response?.data?.message || 'Có lỗi xảy ra khi tải lên tài liệu.', 'error');
     }
   };
 
@@ -132,7 +132,7 @@ export const DocumentsPage: React.FC = () => {
         showToast('Cập nhật tài liệu thành công!', 'success');
         setModalMode(null);
       } catch (err: any) {
-        showToast(err.response?.data?.message || 'Không thể chỉnh sửa tài liệu.', 'error');
+        showToast(err.response?.data?.error?.message || err.response?.data?.message || 'Không thể chỉnh sửa tài liệu.', 'error');
       }
     }
   };
@@ -143,7 +143,7 @@ export const DocumentsPage: React.FC = () => {
         await deleteDocument(selectedDoc.id);
         showToast('Đã xóa mềm tài liệu gốc và vô hiệu hóa liên kết Alias.', 'success');
       } catch (err: any) {
-        showToast(err.response?.data?.message || 'Không có quyền xóa tài liệu.', 'error');
+        showToast(err.response?.data?.error?.message || err.response?.data?.message || 'Không có quyền xóa tài liệu.', 'error');
       } finally {
         setModalMode(null);
       }
@@ -212,7 +212,7 @@ export const DocumentsPage: React.FC = () => {
       setShareDeptId('');
       fetchAliases(selectedDoc.id);
     } catch (err: any) {
-      showToast(err.response?.data?.message || 'Không thể chia sẻ tài liệu.', 'error');
+      showToast(err.response?.data?.error?.message || err.response?.data?.message || 'Không thể chia sẻ tài liệu.', 'error');
     } finally {
       setIsSharing(false);
       setShowShareConfirm(false);
@@ -234,7 +234,7 @@ export const DocumentsPage: React.FC = () => {
         fetchAliases(selectedDoc.id);
       }
     } catch (err: any) {
-      showToast(err.response?.data?.message || 'Không thể thu hồi chia sẻ.', 'error');
+      showToast(err.response?.data?.error?.message || err.response?.data?.message || 'Không thể thu hồi chia sẻ.', 'error');
     } finally {
       setIsRevoking(false);
       setAliasToRevoke(null);

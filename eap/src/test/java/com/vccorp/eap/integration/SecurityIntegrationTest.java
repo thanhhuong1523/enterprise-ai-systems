@@ -32,7 +32,7 @@ public class SecurityIntegrationTest {
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.success").value(false))
-                .andExpect(jsonPath("$.code").value("ERR_UNAUTHENTICATED"));
+                .andExpect(jsonPath("$.error.errorCode").value("ERR_UNAUTHENTICATED"));
     }
 
     @Test
@@ -44,7 +44,7 @@ public class SecurityIntegrationTest {
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.success").value(false))
-                .andExpect(jsonPath("$.code").value("ERR_UNAUTHENTICATED"));
+                .andExpect(jsonPath("$.error.errorCode").value("ERR_UNAUTHENTICATED"));
     }
 
     @Test
@@ -56,6 +56,6 @@ public class SecurityIntegrationTest {
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.success").value(false))
-                .andExpect(jsonPath("$.code").value("ERR_UNAUTHENTICATED"));
+                .andExpect(jsonPath("$.error.errorCode").value("ERR_UNAUTHENTICATED"));
     }
 }

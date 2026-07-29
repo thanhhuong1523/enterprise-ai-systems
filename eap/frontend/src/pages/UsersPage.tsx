@@ -176,7 +176,7 @@ export const UsersPage: React.FC = () => {
       setModalMode(null);
       createForm.reset();
     } catch (err: any) {
-      showToast(err.response?.data?.message || 'Có lỗi xảy ra, vui lòng thử lại.', 'error');
+      showToast(err.response?.data?.error?.message || err.response?.data?.message || 'Có lỗi xảy ra, vui lòng thử lại.', 'error');
     }
   };
 
@@ -195,7 +195,7 @@ export const UsersPage: React.FC = () => {
       setModalMode(null);
       editForm.reset();
     } catch (err: any) {
-      showToast(err.response?.data?.message || 'Có lỗi xảy ra, vui lòng thử lại.', 'error');
+      showToast(err.response?.data?.error?.message || err.response?.data?.message || 'Có lỗi xảy ra, vui lòng thử lại.', 'error');
     }
   };
 
@@ -205,7 +205,7 @@ export const UsersPage: React.FC = () => {
         await deleteUser(selectedUser.id);
         showToast('Đã xóa mềm tài khoản thành công.', 'success');
       } catch (err: any) {
-        showToast(err.response?.data?.message || 'Không thể xóa tài khoản.', 'error');
+        showToast(err.response?.data?.error?.message || err.response?.data?.message || 'Không thể xóa tài khoản.', 'error');
       } finally {
         setModalMode(null);
       }

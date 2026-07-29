@@ -2,6 +2,7 @@ package com.vccorp.eap.service;
 
 import com.vccorp.eap.common.error.ErrorCode;
 import com.vccorp.eap.common.exception.BusinessException;
+import com.vccorp.eap.common.exception.ConcurrentUploadTimeoutException;
 import com.vccorp.eap.dto.CreateAliasRequest;
 import com.vccorp.eap.dto.DocumentResponse;
 import com.vccorp.eap.enums.Role;
@@ -295,7 +296,7 @@ public class DocumentServiceTest {
         when(departmentRepository.findById(deptId)).thenReturn(Optional.of(new Department(deptId, "DEV", "Development")));
         when(departmentRepository.existsById(targetDeptId)).thenReturn(true);
         when(departmentRepository.findById(targetDeptId)).thenReturn(Optional.of(new Department(targetDeptId, "HR", "Human Resources")));
-        when(documentRepository.save(any(Document.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(documentRepository.saveAndFlush(any(Document.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         DocumentResponse alias = documentService.createAlias(request, managerUser);
 
@@ -389,5 +390,103 @@ public class DocumentServiceTest {
 
         assertNotNull(original.getDeletedAt());
         verify(documentRepository, times(1)).softDeleteAliasesByOriginalId(eq(origId), any(LocalDateTime.class));
+    }
+
+    @Test
+    void uploadOriginalDocument_ReusePhysicalFile_Success() throws Exception {
+        MockMultipartFile file = new MockMultipartFile(
+                "file", "test.pdf", "application/pdf", "%PDF-1.4 mock content".getBytes()
+        );
+        Path tempPath = tempDir.toPath().resolve("temp_file");
+        SinglePassStorageResult storageResult = new SinglePassStorageResult("hash_reuse", 100L, tempPath);
+
+        when(transactionManager.getTransaction(any())).thenReturn(mock(TransactionStatus.class));
+        when(uploadCoordinator.coordinate(any())).thenReturn(storageResult);
+        when(deduplicationHelper.executeAggregateCheck(any(JdbcTemplate.class), eq("hash_reuse"), eq(deptId)))
+                .thenReturn(new DeduplicationQueryResult(false, null, "/storage/old_file"));
+        when(advisoryLockHandler.tryAcquireLock(deptId, "hash_reuse")).thenReturn(true);
+        when(fileStorageService.exists("/storage/old_file")).thenReturn(true);
+        when(businessCodeAllocator.allocate()).thenReturn("ORIG_00000002");
+        when(documentRepository.saveAndFlush(any(Document.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        DocumentResponse response = documentService.uploadOriginalDocument("Test Reuse", file, employeeUser);
+
+        assertNotNull(response);
+        verify(fileStorageService, never()).moveTempToPermanent(any(), any());
+        verify(fileStorageService).deleteTempFileQuietly(tempPath);
+    }
+
+    @Test
+    void uploadOriginalDocument_PhysicalFileMissing_UploadsNewFile_Success() throws Exception {
+        MockMultipartFile file = new MockMultipartFile(
+                "file", "test.pdf", "application/pdf", "%PDF-1.4 mock content".getBytes()
+        );
+        Path tempPath = tempDir.toPath().resolve("temp_file");
+        SinglePassStorageResult storageResult = new SinglePassStorageResult("hash_missing", 100L, tempPath);
+
+        when(transactionManager.getTransaction(any())).thenReturn(mock(TransactionStatus.class));
+        when(uploadCoordinator.coordinate(any())).thenReturn(storageResult);
+        when(deduplicationHelper.executeAggregateCheck(any(JdbcTemplate.class), eq("hash_missing"), eq(deptId)))
+                .thenReturn(new DeduplicationQueryResult(false, null, "/storage/old_file"));
+        when(advisoryLockHandler.tryAcquireLock(deptId, "hash_missing")).thenReturn(true);
+        when(fileStorageService.exists("/storage/old_file")).thenReturn(false);
+        when(fileStorageService.moveTempToPermanent(tempPath, "hash_missing")).thenReturn("/storage/new_file");
+        when(businessCodeAllocator.allocate()).thenReturn("ORIG_00000003");
+        when(documentRepository.saveAndFlush(any(Document.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        DocumentResponse response = documentService.uploadOriginalDocument("Test Missing", file, employeeUser);
+
+        assertNotNull(response);
+        verify(fileStorageService).moveTempToPermanent(tempPath, "hash_missing");
+    }
+
+    @Test
+    void uploadOriginalDocument_LockBusyRetryTimeout_ThrowsException() throws Exception {
+        MockMultipartFile file = new MockMultipartFile(
+                "file", "test.pdf", "application/pdf", "%PDF-1.4 mock content".getBytes()
+        );
+        Path tempPath = tempDir.toPath().resolve("temp_file");
+        SinglePassStorageResult storageResult = new SinglePassStorageResult("hash_busy", 100L, tempPath);
+
+        when(transactionManager.getTransaction(any())).thenReturn(mock(TransactionStatus.class));
+        when(uploadCoordinator.coordinate(any())).thenReturn(storageResult);
+        when(deduplicationHelper.executeAggregateCheck(any(JdbcTemplate.class), eq("hash_busy"), eq(deptId)))
+                .thenReturn(new DeduplicationQueryResult(false, null, null));
+        when(advisoryLockHandler.tryAcquireLock(deptId, "hash_busy")).thenReturn(false);
+
+        assertThrows(ConcurrentUploadTimeoutException.class, () ->
+                documentService.uploadOriginalDocument("Test Busy", file, employeeUser)
+        );
+
+        verify(advisoryLockHandler, times(5)).tryAcquireLock(deptId, "hash_busy");
+        verify(fileStorageService).deleteTempFileQuietly(tempPath);
+    }
+
+    @Test
+    void uploadOriginalDocument_UniqueConstraintViolation_ThrowsDuplicateDocumentException() throws Exception {
+        MockMultipartFile file = new MockMultipartFile(
+                "file", "test.pdf", "application/pdf", "%PDF-1.4 mock content".getBytes()
+        );
+        Path tempPath = tempDir.toPath().resolve("temp_file");
+        SinglePassStorageResult storageResult = new SinglePassStorageResult("hash_violation", 100L, tempPath);
+
+        when(transactionManager.getTransaction(any())).thenReturn(mock(TransactionStatus.class));
+        when(uploadCoordinator.coordinate(any())).thenReturn(storageResult);
+        when(deduplicationHelper.executeAggregateCheck(any(JdbcTemplate.class), eq("hash_violation"), eq(deptId)))
+                .thenReturn(new DeduplicationQueryResult(false, null, null));
+        when(advisoryLockHandler.tryAcquireLock(deptId, "hash_violation")).thenReturn(true);
+        when(fileStorageService.moveTempToPermanent(tempPath, "hash_violation")).thenReturn("/storage/new_file");
+        when(businessCodeAllocator.allocate()).thenReturn("ORIG_00000004");
+        
+        when(documentRepository.saveAndFlush(any(Document.class)))
+                .thenThrow(new org.springframework.dao.DataIntegrityViolationException("Duplicate key violation"));
+
+        BusinessException ex = assertThrows(BusinessException.class, () ->
+                documentService.uploadOriginalDocument("Test Violation", file, employeeUser)
+        );
+
+        assertEquals(ErrorCode.ERR_DUPLICATE_DOCUMENT, ex.getErrorCode());
+        assertEquals("Tài liệu đã tồn tại trong phòng ban.", ex.getMessage());
+        verify(fileStorageService, never()).deleteTempFileQuietly(tempPath);
     }
 }

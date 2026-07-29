@@ -3,129 +3,317 @@
 
 ---
 
-## 1. Kiến trúc Tổng thể & Các tầng Component (Overall Architecture & Layers)
+## 1. Sơ đồ Bối cảnh Hệ thống (Context Diagram)
 
-Hệ thống VCC-EAP áp dụng kiến trúc phân lớp (Layered Architecture), tách biệt Controller, Service, Database và Storage nhằm đảm bảo mã nguồn đơn giản, dễ bảo trì.
+Sơ đồ mô tả sự tương tác giữa tác nhân người dùng, giao diện ứng dụng và các thành phần chính của hệ thống trong môi trường vận hành:
+
+```mermaid
+graph TD
+    User[Người dùng]
+    React[React Web Application]
+    UploadAPI[Upload API Service]
+    Database[(PostgreSQL Database)]
+    SharedStorage[Shared Storage]
+
+    User -->|Tải lên tài liệu| React
+    React -->|Multipart HTTP Requests| UploadAPI
+    UploadAPI -->|Đọc/Ghi Metadata & Locks| Database
+    UploadAPI -->|Lưu trữ file vật lý| SharedStorage
+```
+
+---
+
+## 2. Kiến trúc Triển khai (Deployment Architecture)
+
+Sơ đồ mô tả cách phân bố vật lý/logic và mối quan hệ giữa các thành phần khi triển khai hệ thống:
+
+```mermaid
+graph LR
+    Client[Client Browser / React App]
+    LB[Reverse Proxy / Load Balancer]
+    API[Spring Boot API Service]
+    DB[(PostgreSQL Database)]
+    Storage[Shared File Storage]
+
+    Client -->|HTTP/HTTPS| LB
+    LB -->|Reverse Proxy / LB| API
+    API -->|TCP / Connection Pool| DB
+    API -->|NFS / Shared Volume Mount| Storage
+```
+
+### Mô tả các thành phần:
+*   **Client**: Trình duyệt phía người dùng chạy ứng dụng React, gửi yêu cầu HTTP tải tệp.
+*   **Reverse Proxy / Load Balancer**: Tiếp nhận yêu cầu từ client, điều phối tải và định tuyến yêu cầu HTTP đến các thực thể ứng dụng API Service phù hợp.
+*   **Spring Boot API Service**: Thực thể ứng dụng xử lý logic nghiệp vụ, quản lý luồng tải lên và điều phối tài nguyên hệ thống.
+*   **PostgreSQL Database**: Cơ sở dữ liệu quan hệ lưu trữ siêu dữ liệu (metadata) tài liệu và quản lý khóa cố vấn (Advisory Lock) để xử lý tranh chấp ghi đồng thời.
+*   **Shared File Storage**: Phân vùng lưu trữ dùng chung giữa các thực thể ứng dụng API Service, cho phép lưu trữ tệp tin vật lý độc lập với thực thể xử lý.
+
+---
+
+## 3. Kiến trúc Phân lớp Component & Trách nhiệm (Component Architecture & Responsibilities)
+
+Hệ thống áp dụng mô hình phân lớp kiến trúc (Layered Architecture) để tách biệt trách nhiệm giữa các thành phần nhận yêu cầu, xử lý nghiệp vụ, kiểm soát lưu trữ và cơ sở dữ liệu.
 
 ```text
 ┌────────────────────────────────────────────────────────────────────────┐
-│                          Client Layer (React)                          │
+│                              Client Layer                              │
 └───────────────────────────────────┬────────────────────────────────────┘
                                     │ HTTP Requests
                                     ▼
 ┌────────────────────────────────────────────────────────────────────────┐
 │                        API Controller Component                        │
-│ - Tiếp nhận Multipart Request, trích xuất thông tin người dùng.        │
+│ - Tiếp nhận luồng yêu cầu tải tệp (Multipart Stream).                  │
 └───────────────────────────────────┬────────────────────────────────────┘
                                     │
                                     ▼
 ┌────────────────────────────────────────────────────────────────────────┐
 │                         Service Layer Component                        │
-│ - Điều phối luồng xử lý chính: Validate, Hashing, Fast-Check.          │
-│ - Điều phối Transaction, Advisory Lock, Double-Check.                  │
+│ - Điều phối luồng xử lý chính: nhận luồng dữ liệu, tính toán băm.      │
+│ - Quản lý ranh giới giao dịch, khóa cố vấn và kiểm tra trùng lặp.      │
 └─────────────────────┬─────────────────────────────┬────────────────────┘
                       │                             │
                       ▼                             ▼
 ┌─────────────────────────────┐             ┌────────────────────────────┐
-│  Database Layer Component   │             │  Physical Storage Layer    │
-│ - Quản lý Advisory Lock.    │             │ - Quản lý tệp vật lý.      │
-│ - Thực thi truy vấn gộp.    │             │ - Thực thi di chuyển tệp   │
-│ - Đảm bảo ràng buộc UNIQUE. │             │   tạm thời nguyên tử (OS). │
+│        Database Layer       │             │       Storage Layer        │
+│ - Quản lý khóa cố vấn.      │             │ - Quản lý tệp vật lý.      │
+│ - Đảm bảo ràng buộc duy nhất│             │ - Thực thi di chuyển tệp   │
+│   và thực thi truy vấn.     │             │   nguyên tử cấp hệ thống.  │
 └─────────────────────────────┘             └────────────────────────────┘
+```
+
+### Bảng Trách nhiệm Thành phần (Component Responsibility)
+
+| Component | Responsibility |
+| :--- | :--- |
+| **API Controller** | Tiếp nhận yêu cầu HTTP từ Client, xử lý dữ liệu đầu vào dạng Multipart Stream và định tuyến đến tầng dịch vụ. |
+| **Upload Service** | Điều phối toàn bộ quy trình tải lên (Upload Pipeline), quản lý luồng tính toán mã băm, kiểm soát ranh giới giao dịch và cơ chế thử lại. |
+| **Storage Layer** | Quản lý tệp vật lý trên phân vùng lưu trữ dùng chung, xử lý việc ghi tệp tạm, di chuyển tệp nguyên tử và xóa bỏ tệp khi cần thiết. |
+| **Database Layer** | Lưu trữ và bảo toàn siêu dữ liệu (metadata), thực thi khóa cố vấn (Advisory Lock) và bảo đảm các ràng buộc duy nhất của dữ liệu. |
+| **Cleanup Job** | Tiến trình chạy ngầm định kỳ thực hiện quét và giải phóng các tài nguyên tệp tạm hết hạn hoặc các tệp vật lý mồ côi ngoài giờ cao điểm. |
+
+---
+
+## 4. Kiến trúc Runtime & Luồng Dữ liệu (Runtime View & Data Flow)
+
+### 4.1. Sơ đồ Runtime Khái quát
+
+```
+Yêu cầu HTTP (Tải tệp)
+       ↓
+Quy trình Tải lên (Upload Pipeline)
+       ↓
+Kiểm tra Trùng lặp (Fast / Double Check)
+       ↓
+Giao dịch & Khóa (Transaction & Advisory Lock)
+       ↓
+Lưu trữ Vật lý & Metadata (Storage & Metadata Persist)
+       ↓
+Phản hồi kết quả (HTTP Response)
+```
+
+### 4.2. Chi tiết Quy trình Tải lên (Upload Pipeline)
+
+Luồng xử lý tải lên tài liệu được chuẩn hóa thành một pipeline tuần tự gồm 10 giai đoạn để tối ưu hiệu năng và đảm bảo an toàn đồng thời:
+
+1.  **Receive HTTP Stream**: Tiếp nhận luồng dữ liệu tải lên trực tiếp từ yêu cầu HTTP.
+2.  **Write Temporary File + Compute SHA-256 (One-pass)**: Đọc luồng dữ liệu đầu vào và ghi trực tiếp vào một tệp tạm thời trên vùng đĩa dùng chung, đồng thời tính toán mã băm SHA-256 của nội dung tệp tin trong cùng một lượt đọc (One-pass) để tránh đọc lại luồng dữ liệu.
+3.  **Validate Magic Bytes**: Sử dụng tệp tạm thời để xác thực cấu trúc byte nhận dạng (magic bytes) nhằm đảm bảo tệp tải lên hợp lệ về mặt định dạng.
+4.  **Fast Duplicate Check**: Thực hiện kiểm tra nhanh sự tồn tại của tài liệu hoạt động cùng nội dung trong phòng ban ngoài phạm vi giao dịch. Nếu phát hiện đã tồn tại tài liệu, tệp tạm thời sẽ bị hủy ngay lập tức và hệ thống trả về lỗi trùng lặp mà không cần tạo giao dịch hay xin khóa.
+5.  **Acquire Advisory Lock**: Thực hiện xin khóa cố vấn (Advisory Lock) cấp giao dịch của cơ sở dữ liệu dựa trên mã định danh phòng ban và mã băm của tệp tin. Deterministic Lock Key được tạo từ Department và File Hash. Quá trình này được thực hiện thông qua một vòng lặp thử lại với thời gian chờ tăng dần nằm ngoài phạm vi giao dịch để tránh chiếm dụng kết nối.
+6.  **Double Duplicate Check**: Sau khi lấy khóa thành công và đi vào phạm vi giao dịch, thực hiện kiểm tra lại trạng thái tài liệu để phòng ngừa trường hợp có yêu cầu chạy song song vừa ghi nhận thành công tài liệu trong lúc yêu cầu này đang chờ khóa.
+7.  **Persist Metadata**: Lưu thông tin siêu dữ liệu (metadata) của tài liệu vào cơ sở dữ liệu, sử dụng mã định danh nghiệp vụ được sinh nguyên tử bởi cơ sở dữ liệu để bảo đảm tính duy nhất và an toàn.
+8.  **Move Physical File**: Thực hiện di chuyển tệp tạm thời sang thư mục lưu trữ chính thức bằng thao tác đổi tên nguyên tử ở cấp hệ điều hành (Atomic OS Rename). Nếu tệp vật lý tương ứng đã tồn tại (do phòng ban khác đã tải lên trước đó), hệ thống hủy tệp tạm thời và sử dụng đường dẫn tệp vật lý sẵn có (Single Instance Storage).
+9.  **Commit Transaction**: Hoàn tất giao dịch, hệ thống tự động giải phóng khóa cố vấn cấp giao dịch và trả kết nối về pool.
+10. **Cleanup**: Đảm bảo dọn dẹp các tài nguyên tạm thời (tệp tạm) trong mọi trường hợp nếu chưa được di chuyển thành công.
+
+---
+
+## 5. Chiến lược Kiểm soát Đồng thời & Thử lại (Concurrency & Retry Strategy)
+
+### 5.1. Ranh giới Giao dịch & Chiến lược Khóa (Transaction Boundary & Lock Strategy)
+*   **Khóa cố vấn cấp giao dịch (Transaction-level Advisory Lock)**: Khóa được yêu cầu ngay khi bắt đầu giao dịch và tự động giải phóng khi giao dịch commit hoặc rollback. Phạm vi khóa được giới hạn theo Deterministic Lock Key được tạo từ Department và File Hash.
+*   **Ghép nối kết nối (Connection Pinning)**: Đảm bảo toàn bộ các thao tác trong giao dịch (từ xin khóa, kiểm tra trùng lặp lần 2, cho đến chèn siêu dữ liệu) đều thực thi trên cùng một kết nối cơ sở dữ liệu duy nhất.
+*   **Mức cô lập giao dịch (Transaction Isolation Level)**: Sử dụng mức cô lập giao dịch mặc định (Read Committed) kết hợp với khóa cố vấn và ràng buộc duy nhất để tối ưu hiệu năng và tránh tranh chấp.
+
+### 5.2. Chiến lược Thử lại (Retry Strategy)
+*   **Ngủ ngoài giao dịch (Sleep Outside Transaction)**: Vòng lặp thử lại và thời gian chờ ngủ phải được thực thi hoàn toàn ngoài phạm vi giao dịch. Nếu không lấy được khóa cố vấn, giao dịch phải rollback ngay lập tức và giải phóng kết nối về pool trước khi vào trạng thái chờ (sleep).
+*   **Giải thuật Backoff**: Sử dụng thuật toán Jittered Exponential Backoff để tính toán thời gian chờ giữa các lần thử lại nhằm phân tán mật độ yêu cầu đồng thời.
+*   **Cấu hình**: Retry Strategy sử dụng cấu hình từ hệ thống để quản lý số lần thử tối đa và các khoảng trễ cơ sở/tối đa.
+
+---
+
+## 6. Kiến trúc Lưu trữ & Dữ liệu Logic (Storage & High-level Database Architecture)
+
+### 6.1. Chiến lược Lưu trữ (Storage Strategy)
+*   **Single Instance Storage (SIS)**: Áp dụng cơ chế lưu trữ đơn bản trên toàn hệ thống. Nếu các phòng ban khác nhau tải lên các tệp tin có cùng mã băm nội dung, hệ thống chỉ lưu trữ duy nhất một tệp vật lý trên đĩa nhưng quản lý bằng các bản ghi siêu dữ liệu độc lập. Để đảm bảo tính nhất quán giữa siêu dữ liệu và tệp tin vật lý, hệ thống phải kiểm tra tính tồn tại thực tế của tệp tin trên đĩa trước khi quyết định tái sử dụng tài nguyên lưu trữ. Nếu tệp tin vật lý không tồn tại, hệ thống phải tự động chuyển sang luồng ghi mới tệp tin.
+*   **Shared Partition**: Thư mục lưu trữ tạm thời và thư mục lưu trữ chính thức phải nằm trên cùng một phân vùng đĩa dùng chung để đảm bảo thao tác di chuyển tệp là thao tác đổi tên nguyên tử ở tầng hệ điều hành (không tốn tài nguyên I/O sao chép dữ liệu).
+
+### 6.2. Kiến trúc Dữ liệu Logic (High-level Database Architecture)
+Mô tả quan hệ logic giữa các thực thể dữ liệu trong hệ thống mà không đi vào chi tiết cấu trúc vật lý:
+
+```
+Document ──(belongs to)──> Department
+Document ──(points to)───> Physical File (Single Instance Storage)
+```
+
+*   **Document**: Đại diện cho bản ghi tài liệu hoặc liên kết tài liệu (Alias). Bản ghi này lưu trữ thông tin về phòng ban sở hữu, thông tin phiên bản và chỉ tới một tệp vật lý duy nhất nếu là tài liệu gốc.
+*   **Department**: Đơn vị quản lý tài liệu. Mỗi tài liệu luôn thuộc sở hữu của một phòng ban xác định để áp dụng cơ chế cô lập dữ liệu.
+*   **Physical File**: Đối tượng lưu trữ thực tế trên đĩa cứng. Nhiều tài liệu thuộc các phòng ban khác nhau có thể cùng liên kết đến một Physical File duy nhất để tối ưu hóa không gian lưu trữ (Single Instance Storage).
+
+---
+
+## 7. Kiến trúc Dọn dẹp Định kỳ (Scheduled Cleanup Architecture)
+
+Hệ thống thiết lập một tiến trình chạy ngầm định kỳ ngoài giờ cao điểm để quản lý và tối ưu hóa tài nguyên lưu trữ thực tế.
+
+*   **Tác vụ kích hoạt (Trigger)**: Scheduled Cleanup Job chạy định kỳ theo cấu hình hệ thống.
+*   **Quy trình thực thi (Workflow)**:
+    1.  **Dọn dẹp tệp tạm thời (Temporary File Cleanup)**: Quét thư mục tạm thời và thực hiện xóa các tệp tạm đã hết hạn dựa trên thời gian tạo vượt quá cấu hình quy định.
+    2.  **Dọn dẹp tệp mồ côi (Orphan File Cleanup)**: Quét các tệp vật lý trong thư mục lưu trữ chính thức, đối chiếu với cơ sở dữ liệu để tìm ra các tệp không còn bất kỳ tài liệu hoạt động hoặc tài liệu đã bị xóa (ở dạng lưu trữ lịch sử) nào tham chiếu đến. Để tránh hiện tượng tranh chấp (race condition) khi tệp tin vật lý vừa được di chuyển vào thư mục chính thức nhưng giao dịch cơ sở dữ liệu lưu metadata chưa kịp commit (khiến hệ thống hiểu lầm tệp đó là mồ côi), tiến trình dọn dẹp chỉ được xử lý các tệp vật lý mồ côi đã tồn tại vượt quá một khoảng thời gian an toàn (grace period) xác định từ thời điểm ghi tệp.
+
+---
+
+## 8. Kiến trúc Xử lý Lỗi (Error Handling Architecture)
+
+Hệ thống quản lý lỗi tập trung ở mức kiến trúc nhằm bảo đảm tính toàn vẹn của dữ liệu và hệ thống tệp tin:
+
+| Tình huống lỗi (Failure) | Chiến lược xử lý (Strategy) |
+| :--- | :--- |
+| **Yêu cầu không hợp lệ / Sai magic bytes (Validation Failure)** | Từ chối yêu cầu và trả về lỗi định dạng (HTTP 400 Bad Request). |
+| **Tài liệu trùng lặp (Duplicate)** | Từ chối yêu cầu và trả về thông tin lỗi trùng lặp (HTTP 409 Conflict). |
+| **Quá thời gian xin khóa (Lock Timeout)** | Thực hiện cơ chế thử lại (Retry) ngoài giao dịch. Từ chối yêu cầu và trả về lỗi (HTTP 429 Too Many Requests) nếu vượt số lần thử tối đa. |
+| **Lỗi ghi tệp vật lý (Storage Failure)** | Hủy giao dịch (Rollback), dọn dẹp các tệp tạm và trả về lỗi hệ thống (HTTP 500 Internal Server Error). |
+| **Lỗi cơ sở dữ liệu (Database Failure)** | Hủy giao dịch (Rollback), dọn dẹp tài nguyên tệp tạm và trả về lỗi hệ thống (HTTP 500 Internal Server Error). |
+| **Lỗi dọn dẹp định kỳ (Cleanup Failure)** | Ghi nhật ký lỗi hệ thống, tiến trình sẽ tự động chạy lại vào chu kỳ dọn dẹp tiếp theo. |
+
+---
+
+## 9. Kiến trúc Phi Chức năng (Non-functional Architecture)
+
+*   **Performance (Hiệu năng)**:
+    *   Sử dụng cơ chế kiểm tra trùng lặp nhanh (Fast Check) để từ chối sớm yêu cầu trước khi khởi tạo giao dịch hoặc xin khóa.
+    *   Sử dụng cơ chế One-pass để ghi tệp và tính toán mã băm trong cùng một luồng đọc nhằm giảm thiểu thao tác I/O đĩa.
+    *   Thao tác di chuyển tệp chính thức sử dụng đổi tên nguyên tử (Atomic OS Rename) trên cùng phân vùng dùng chung với độ trễ tối thiểu.
+*   **Reliability (Độ tin cậy)**:
+    *   Khóa cố vấn cấp giao dịch (Advisory Lock) tự động giải phóng khi giao dịch commit/rollback giúp hạn chế rò rỉ khóa.
+    *   Cơ chế dọn dẹp tệp tạm đảm bảo các tài nguyên tạm thời được giải phóng hoàn toàn ngay cả khi luồng xử lý gặp lỗi hệ thống đột ngột.
+*   **Scalability (Khả năng mở rộng)**:
+    *   Tiến trình thử lại khóa được đưa ra ngoài ranh giới giao dịch giúp ngăn ngừa nghẽn Connection Pool dưới tải cao, cho phép mở rộng số lượng API instance một cách độc lập.
+    *   Phân tách lưu trữ vật lý (Shared File Storage) cho phép các thực thể API Service hoạt động song song chia sẻ chung một phân vùng dữ liệu vật lý.
+*   **Consistency (Tính nhất quán)**:
+    *   Kết hợp cơ chế Double Duplicate Check trong giao dịch có khóa bảo đảm không có tài liệu trùng lặp nào được ghi nhận đồng thời.
+    *   Ràng buộc dữ liệu duy nhất cấp cơ sở dữ liệu đóng vai trò chốt chặn cuối cùng ngăn ngừa xung đột dữ liệu.
+    *   Nguyên tắc nhất quán giữa siêu dữ liệu và vật lý: Hệ thống chỉ tái sử dụng đường dẫn tệp tin cũ khi tệp tin vật lý đó thực sự tồn tại trên phân vùng lưu trữ, tránh hiện tượng mồ côi siêu dữ liệu trỏ vào tệp rỗng.
+*   **Maintainability (Khả năng bảo trì)**:
+    *   Tách biệt rõ ràng các tầng trách nhiệm thông qua Component Architecture giúp dễ dàng nâng cấp hoặc thay thế hạ tầng (ví dụ thay đổi phân vùng lưu trữ hoặc cấu hình cơ sở dữ liệu) mà không làm ảnh hưởng đến logic nghiệp vụ cốt lõi.
+
+---
+
+## 10. Bảng Tổng hợp Quyết định Công nghệ (Technology Decisions)
+
+| Lĩnh vực (Area) | Quyết định Kiến trúc (Decision) |
+| :--- | :--- |
+| **Kiến trúc tổng thể** | Kiến trúc phân lớp (Layered Architecture) |
+| **Quản lý khóa ghi đồng thời** | Khóa cố vấn cấp giao dịch (PostgreSQL Advisory Lock) |
+| **Tối ưu không gian đĩa** | Lưu trữ đơn bản (Single Instance Storage) |
+| **Cơ chế thử lại khóa** | Giãn cách lũy thừa có nhiễu (Jittered Exponential Backoff) |
+| **Thuật toán băm nội dung** | SHA-256 |
+| **Cơ sở dữ liệu metadata** | PostgreSQL |
+
+---
+
+## 11. Sơ đồ Tuần tự mức Kiến trúc (Architecture Sequence Diagram)
+
+Sơ đồ thể hiện sự tương tác giữa các thành phần khi có hai yêu cầu tải lên đồng thời cùng một tệp tin trong một phòng ban:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor UserA as Người dùng A
+    actor UserB as Người dùng B
+    participant Controller as API Controller
+    participant Service as Service Layer
+    participant Storage as Storage Layer
+    participant DB as Database Layer
+
+    par Request A (Đến trước)
+        UserA->>Controller: Tải lên File X
+        Controller->>Service: Xử lý yêu cầu A
+        Service->>Storage: Ghi tệp tạm & Tính mã băm X
+        Service->>DB: Kiểm tra trùng lặp nhanh (Ngoài Tx)
+        DB-->>Service: Chưa tồn tại
+    and Request B (Đến sau vài ms)
+        UserB->>Controller: Tải lên File X
+        Controller->>Service: Xử lý yêu cầu B
+        Service->>Storage: Ghi tệp tạm & Tính mã băm X
+        Service->>DB: Kiểm tra trùng lặp nhanh (Ngoài Tx)
+        DB-->>Service: Chưa tồn tại
+    end
+
+    Note over Service, DB: Request A bắt đầu giao dịch và xin khóa thành công
+    Service->>DB: Bắt đầu Giao dịch A
+    Service->>DB: Xin khóa cố vấn cho (Dept, Hash X)
+    DB-->>Service: Thành công (Acquired)
+
+    Note over Service, DB: Request B bắt đầu giao dịch nhưng xin khóa thất bại
+    Service->>DB: Bắt đầu Giao dịch B
+    Service->>DB: Xin khóa cố vấn cho (Dept, Hash X)
+    DB-->>Service: Thất bại (Locked)
+    Service->>DB: Hủy Giao dịch B & Nhả kết nối
+    Note over Service: Request B bắt đầu chờ (Backoff Sleep) ngoài giao dịch
+
+    Note over Service, DB: Giao dịch A tiếp tục luồng xử lý
+    Service->>DB: Kiểm tra trùng lặp lần 2 (Trong Tx)
+    DB-->>Service: Chưa tồn tại
+    Service->>DB: Lưu siêu dữ liệu tài liệu (Sinh mã định danh nghiệp vụ nguyên tử)
+    Service->>Storage: Di chuyển tệp tạm sang chính thức
+    Service->>DB: Hoàn tất Giao dịch A (Tự động giải phóng khóa)
+    Service-->>UserA: Trả về HTTP 201 Created
+
+    Note over Service: Request B hết thời gian chờ, thử lại giao dịch mới
+    Service->>DB: Bắt đầu Giao dịch B2
+    Service->>DB: Xin khóa cố vấn cho (Dept, Hash X)
+    DB-->>Service: Thành công (Acquired)
+    Service->>DB: Kiểm tra trùng lặp lần 2 (Trong Tx)
+    DB-->>Service: Đã tồn tại (Vừa được tạo bởi Giao dịch A)
+    Service->>DB: Hủy Giao dịch B2 (Tự động giải phóng khóa)
+    Service->>Storage: Xóa tệp tạm của Request B
+    Service-->>UserB: Trả về HTTP 409 Conflict
 ```
 
 ---
 
-## 2. Luồng Dữ liệu Kiến trúc (High-Level Data Flow)
+## 12. Các Quyết định Kiến trúc (Architecture Decision Records - ADR)
 
-Hệ thống phân tách luồng xử lý thành hai pha độc lập nhằm tối ưu hóa kết nối cơ sở dữ liệu:
+### 12.1. ADR-008: Khóa cố vấn cấp giao dịch kết hợp thử lại ngoài giao dịch
+*   **Quyết định**: Sử dụng cơ chế khóa cố vấn cấp giao dịch của cơ sở dữ liệu. Vòng lặp thử lại và việc tính toán thời gian chờ ngủ phải được thực thi bên ngoài ranh giới giao dịch cơ sở dữ liệu.
+*   **Lý do**:
+    *   Tự động giải phóng khóa khi giao dịch kết thúc (Commit hoặc Rollback), hạn chế tối đa rủi ro rò rỉ khóa.
+    *   Giải phóng kết nối ngay khi không lấy được khóa và chờ ngoài giao dịch giúp bảo vệ Connection Pool, ngăn ngừa hiện tượng cạn kiệt kết nối (Connection Pool Starvation) dưới tải cao.
+    *   Đảm bảo nguyên tắc ghép nối kết nối (Connection Pinning) trong giao dịch.
 
-### Pha 1: Tiếp nhận và Lưu tạm thời (Ngoài Giao dịch)
-1.  API tiếp nhận yêu cầu gồm tiêu đề và luồng tệp tin.
-2.  Hệ thống thực hiện kiểm tra quyền hạn của người dùng.
-3.  Hệ thống vừa đọc luồng tệp tin vừa tính toán mã băm SHA-256 của tệp, đồng thời ghi trực tiếp nội dung vào một tệp tạm thời trên ổ đĩa.
-4.  Tính toán mã băm kết thúc, hệ thống thực hiện một truy vấn kiểm tra nhanh (Fast-Check) để xác định tệp đã tồn tại trong phòng ban chưa. Nếu phát hiện tài liệu hoạt động (deleted_at IS NULL) đã tồn tại trong cùng phòng ban, hệ thống hủy tệp tạm và trả về HTTP 409 Conflict (Duplicate Document) mà không đi vào Transaction.
+### 12.2. ADR-009: Giới hạn phạm vi khóa bằng mã băm xác định
+*   **Quyết định**: Sử dụng mã băm xác định được tính toán từ phòng ban sở hữu và mã băm của tệp tin để làm ID khóa cố vấn.
+*   **Lý do**: Đảm bảo Deterministic Lock Key được tạo từ Department và File Hash giúp triệt tiêu rủi ro trùng lặp ID khóa, ngăn chặn hiện tượng khóa chéo không mong muốn giữa các phòng ban hoặc các tệp tin khác nhau mà không bị ảnh hưởng bởi chi tiết cài đặt vật lý.
 
-### Pha 2: Khóa cố vấn, Giao dịch & Đảm bảo tính nhất quán (Single-Connection Transaction Boundary)
-Toàn bộ các thao tác xin khóa cố vấn cấp giao dịch (`pg_try_advisory_xact_lock`), Double-Check, di chuyển tệp vật lý và ghi bản ghi metadata được đóng gói thực thi bên trong cùng một Database Transaction. Điều này đảm bảo advisory lock luôn có hiệu lực trong toàn bộ giao dịch và được PostgreSQL tự động giải phóng khi Transaction kết thúc (Commit hoặc Rollback).
+### 12.3. ADR-010: Tự động sinh mã nghiệp vụ nguyên tử
+*   **Quyết định**: Sử dụng cơ chế tự động sinh mã nghiệp vụ của tài liệu một cách tuần tự và nguyên tử từ cơ sở dữ liệu.
+*   **Lý do**: Đảm bảo Business Identifier được sinh nguyên tử bởi cơ sở dữ liệu để tránh xung đột hoặc trùng lặp mã nghiệp vụ khi có nhiều yêu cầu ghi nhận siêu dữ liệu đồng thời trong cùng một thời điểm.
 
-1. Bắt đầu một Database Transaction.
-2. Thử lấy khóa bằng pg_try_advisory_xact_lock với phạm vi (ownerDepartmentId, hash).
-   * Nếu chưa lấy được khóa, request kết thúc Transaction hiện tại, chờ theo chính sách Retry và thử lại. Sau tối đa 5 lần retry vẫn không lấy được khóa thì trả về HTTP 429 (Too Many Requests).
-3. Thực hiện truy vấn gộp (Double-Check) trên kết nối A để kiểm tra lại trạng thái tệp tin. Nếu phát hiện tệp đã được tạo bởi luồng khác: Ngắt giao dịch (rollback) để tự động giải phóng khóa cố vấn, hủy tệp tạm và trả về HTTP 409 Conflict (Duplicate Document).
-4. Kiểm tra sự tồn tại của tệp vật lý trên đĩa:
-    * **Đã tồn tại**: Tái sử dụng liên kết tệp vật lý có sẵn.
-    * **Chưa tồn tại**: Di chuyển tệp tạm vào thư mục lưu trữ chính thức bằng thao tác đổi tên tức thời (atomic rename ở tầng hệ điều hành). Nếu gặp lỗi đụng độ do phòng ban khác vừa rename thành công (ném ra `FileAlreadyExistsException`), tiến hành bắt ngoại lệ và tự động tái sử dụng đường dẫn tệp vật lý có sẵn đó mà không gây lỗi giao dịch.
-5. Thực hiện câu lệnh SQL INSERT bản ghi siêu dữ liệu tài liệu vào database (sử dụng sequence `doc_business_code_seq` để sinh `business_code` nguyên tử).
-6. Hoàn tất giao dịch (Commit Transaction), PostgreSQL tự động giải phóng khóa cố vấn transaction-level và trả kết nối A về HikariCP pool.
+### 12.4. ADR-011: Áp dụng cơ chế kiểm tra nhanh trước khi xin khóa
+*   **Quyết định**: Thực hiện kiểm tra trùng lặp nhanh (Fast-Check) ngoài giao dịch ngay sau khi hoàn thành tính toán mã băm tệp.
+*   **Lý do**: Giảm thiểu tải cho cơ sở dữ liệu bằng cách loại bỏ sớm các yêu cầu tải lên tệp tin trùng lặp rõ ràng mà không cần khởi tạo giao dịch hoặc xếp hàng xin khóa.
 
----
+### 12.5. ADR-012: Tối ưu hóa truy vấn bằng cơ chế gộp thông tin
+*   **Quyết định**: Thiết kế truy vấn gộp kiểm tra thông tin tài liệu trùng lặp và liên kết tệp vật lý cũ nhất trong cùng một câu lệnh.
+*   **Lý do**: Giảm số lượng lượt kết nối cơ sở dữ liệu (round-trips) ở các bước kiểm tra trùng lặp, nâng cao hiệu năng xử lý ở mức kiến trúc truy cập.
 
-## 3. Các Quyết định Kiến trúc Bổ sung (Architecture Decision Records - ADR)
+### 12.6. ADR-013: Phân vùng lưu trữ dùng chung cho tệp tạm và chính thức
+*   **Quyết định**: Thư mục tạm thời và thư mục lưu trữ chính thức phải nằm trên cùng một mount point vật lý hoặc mạng dùng chung.
+*   **Lý do**: Đảm bảo thao tác di chuyển tệp thực thi tức thời bằng lệnh đổi tên của hệ điều hành, giúp rút ngắn thời gian giữ giao dịch.
 
-### 3.1. ADR-008: Sử dụng Transaction-level Advisory Lock
-*   **Context (Bối cảnh)**: Advisory Lock ở cấp Transaction chỉ có hiệu lực trong phạm vi Transaction đang thực thi. Nếu các thao tác đồng bộ không được thực hiện trong cùng một Transaction, hệ thống có thể mất tính nhất quán hoặc làm Advisory Lock không còn hiệu lực như mong muốn.
-*   **Rationale (Lý do chọn)**:
-    *   Sử dụng Spring `TransactionTemplate` bao bọc toàn bộ chuỗi thao tác (xin khóa giao dịch `pg_try_advisory_xact_lock`, Double-Check, di chuyển tệp, và INSERT metadata).
-    *   Đảm bảo 100% các câu lệnh SQL trong luồng đồng bộ đều thực thi trên đúng **1 kết nối JDBC vật lý duy nhất (Pinned Connection)**, loại bỏ rủi ro lệch kết nối. Tất cả câu lệnh SQL trong một Transaction phải sử dụng cùng một physical JDBC Connection. Hệ thống không được tạo thêm physical connection phụ nào khác hoặc làm mất Connection Pinning (ghim kết nối) của giao dịch. Thiết kế kiến trúc này độc lập với thư viện triển khai và không ép buộc sử dụng JdbcTemplate hay DataSourceUtils.
-    *   Khóa cố vấn ở cấp độ giao dịch (`pg_try_advisory_xact_lock`) được tự động giải phóng bởi PostgreSQL ngay khi giao dịch kết thúc (Commit hoặc Rollback), giúp loại bỏ hoàn toàn nguy cơ rò rỉ khóa do lỗi lập trình và không cần mở khóa thủ công.
-    *   Nếu chưa lấy được khóa, request kết thúc Transaction hiện tại và thực hiện Retry ngoài Transaction. SRetry chỉ áp dụng trong trường hợp không lấy được Advisory Lock. Retry không áp dụng đối với trường hợp tài liệu đã tồn tại sau Double-Check. Khi đó request kết thúc ngay bằng HTTP 409 Conflict.
-
-### 3.2. ADR-009: Thiết lập Phạm vi Khóa theo Phòng ban và Mã băm tệp với 64-bit Lock ID
-*   **Context (Bối cảnh)**: Khóa chống trùng lặp cần đảm bảo không gây nghẽn chéo giữa các phòng ban khác nhau khi tải lên cùng một nội dung tệp tin.
-*   **Rationale (Lý do chọn)**:
-    *   Chuẩn hóa cách sinh Lock ID 64-bit từ PostgreSQL:
-        - ownerDepartmentId: UUID.toString()
-        - hash: SHA-256 lowercase
-        - delimiter: ":"
-        - Lock ID: `hashtextextended(concat(ownerDepartmentId, ':', hash), 0)` (trả về kiểu BIGINT 64-bit).
-    *   Phạm vi khóa (Lock Scope): Chỉ thực hiện khóa cặp duy nhất `(ownerDepartmentId, hash)`. Hệ thống tuyệt đối không thực hiện khóa trên toàn bảng `documents`, không khóa trên toàn bộ phòng ban (`ownerDepartmentId`) và không khóa toàn bộ hệ thống lưu trữ (storage).
-    *   Các phòng ban khác nhau tải lên cùng 1 file tại cùng 1 thời điểm sẽ có Lock ID khác nhau, hoàn toàn không bị chặn chéo nhau. Tái sử dụng tệp vật lý (SIS) được xử lý an toàn ở tầng OS qua thao tác atomic rename.
-
-### 3.3. ADR-010: Sinh Mã Nghiệp vụ Nguyên tử bằng PostgreSQL Sequence (`doc_business_code_seq`)
-*   **Context (Bối cảnh)**: Cột `business_code` có ràng buộc UNIQUE constraint (`ORIG_xxxxxx`). Việc sinh chuỗi trong RAM ứng dụng dễ gây va chạm Unique Constraint khi có 100 concurrent requests.
-*   **Rationale (Lý do chọn)**:
-    *   Khởi tạo PostgreSQL sequence `doc_business_code_seq` trong Flyway migration V9 (`START WITH 100000 INCREMENT BY 1`).
-    *   Khi INSERT bản ghi mới, câu lệnh SQL gọi trực tiếp `nextval('doc_business_code_seq')` để ghép chuỗi `'ORIG_' || lpad(nextval('doc_business_code_seq')::text, 8, '0')`.
-    *   Đảm bảo mã nghiệp vụ duy nhất 100% và nguyên tử ở tầng CSDL với tốc độ tiệm cận 0ms, loại bỏ hoàn toàn đụng độ Unique constraint under stress load.
-
-### 3.4. ADR-011: Áp dụng cơ chế Fast-Check trước khi yêu cầu Khóa
-*   **Context (Bối cảnh)**: Khi xảy ra thói quen click đúp hoặc dưới tải cao, nhiều request trùng lặp được gửi lên liên tục. Nếu tất cả đều đi thẳng vào hàng đợi khóa cố vấn, hệ thống sẽ bị tuần tự hóa toàn bộ và nghẽn tài nguyên kết nối.
-*   **Rationale (Lý do chọn)**:
-    *   Fast-Check giúp loại bỏ các request đến muộn khi tài liệu đã tồn tại trong cùng phòng ban. Các request này được trả ngay HTTP 409 Conflict mà không cần tham gia Transaction hoặc hàng đợi Advisory Lock.
-
-### 3.5. ADR-012: Sử dụng Truy vấn Aggregate để gộp hai truy vấn thành một
-*   **Context (Bối cảnh)**: Hệ thống cần thực hiện hai mục đích: (1) kiểm tra trùng lặp hoạt động trong phòng ban hiện tại, và (2) kiểm tra đường dẫn file vật lý cũ nhất trên toàn hệ thống để tái sử dụng (SIS).
-*   **Rationale (Lý do chọn)**:
-    *   Sử dụng truy vấn SQL Aggregate lọc theo `hash` trả về đúng 1 dòng phẳng duy nhất chứa 3 cột logic (`has_active_in_dept`, `active_doc_id`, `oldest_file_ref`). Giảm số lượng DB round-trips từ 2 xuống 1 ở cả hai bước Fast-Check và Double-Check.
-
-### 3.6. ADR-013: Ghi tệp tạm ngoài Transaction và đổi tên nguyên tử trong Khóa
-*   **Context (Bối cảnh)**: Thao tác ghi tệp nhị phân có dung lượng lớn (lên tới 50MB) tốn nhiều thời gian I/O đĩa.
-*   **Rationale (Lý do chọn)**:
-    *   Tách biệt hoàn toàn phần I/O ghi đĩa chậm ra ngoài phạm vi giao dịch (ghi file tạm tại `/eap-storage/tmp`).
-    *   Trong transaction có giữ khóa cố vấn, hệ thống chỉ thực hiện thao tác di chuyển tệp tạm sang tệp đích bằng phương pháp đổi tên tức thời (`Files.move` - atomic rename ở tầng OS, <1ms), giúp giải phóng khóa cố vấn ngay lập tức.
-    *   Khi chỉ tồn tại bản ghi đã xóa mềm, thao tác atomic rename chỉ thực hiện nếu file vật lý chưa tồn tại. Nếu file vật lý đã tồn tại thì bỏ qua bước rename và tái sử dụng đường dẫn hiện có.
-
-### 3.7. ADR-014: Sử dụng đồng thời hai chỉ mục tối ưu hóa cho hai phạm vi nghiệp vụ
-*   **Context (Bối cảnh)**: Ràng buộc duy nhất chống trùng lặp áp dụng theo cặp `(phòng ban, mã băm)` và lọc bản ghi hoạt động. Trong khi đó, luồng tìm kiếm file vật lý cũ nhất (SIS) cần quét trên toàn bộ bản ghi (kể cả bản ghi đã xóa mềm).
-*   **Rationale (Lý do chọn)**:
-    *   Sử dụng **hai chỉ mục**:
-        1. `CREATE UNIQUE INDEX uq_documents_hash_dept ON documents(hash, owner_department_id) WHERE deleted_at IS NULL;` (chỉ mục bán phần cho chống trùng).
-        2. `CREATE INDEX idx_documents_hash ON documents(hash);` (chỉ mục toàn phần cho Physical file lookup lookup).
-    *   Đảm bảo cả hai luồng nghiệp vụ đều đạt hiệu năng tối ưu $O(\log N)$ và triệt tiêu hoàn toàn rủi ro Sequential Scan.
-
----
-
-## 4. Yêu cầu Triển khai & Hạ tầng (Deployment & Infrastructure Requirements)
-
-Để hệ thống hoạt động ổn định và đáp ứng đúng cam kết SLA, quá trình triển khai thực tế của đội ngũ DevOps phải tuân thủ các chỉ số sau:
-
-### 4.1. Phân vùng lưu trữ dùng chung cho File tạm và File đích (Shared Partition)
-*   **Yêu cầu**: Thư mục lưu trữ tạm thời (ví dụ: `/eap-storage/tmp`) và thư mục lưu trữ chính thức (`/eap-storage`) **bắt buộc phải được cấu hình trên cùng một mount point/partition mạng dùng chung** (ví dụ: cùng một ổ AWS EFS hoặc cùng một thư mục NFS).
-*   **Lý do**: Trong môi trường phân tán đa node, `/eap-storage` bắt buộc là một Network File System dùng chung, còn `/tmp` cục bộ nằm trên từng node ứng dụng. Nếu lưu tệp tạm ở `/tmp` cục bộ rồi di chuyển tới `/eap-storage`, hệ điều hành sẽ phải chuyển thao tác đổi tên (rename) thành thao tác *copy rồi delete* chéo mount point, làm kéo dài thời gian giữ giao dịch và mất đi tính nguyên tử (atomic rename). Cấu hình tệp tạm nằm tại thư mục con của ổ đĩa mạng dùng chung (như `/eap-storage/tmp`) sẽ đảm bảo thao tác `Files.move` diễn ra tức thời (<1ms) và an toàn tuyệt đối.
-
-### 4.2. Cấu hình Connection Pool & Cơ sở dữ liệu cho Tải cao
-Hệ thống được thiết kế để hoạt động tối ưu dưới tải cao bằng cách phân rã các tác vụ CPU-bound và CPU-unbound:
-
-*   **Tác vụ CPU-bound (Tính toán SHA-256 hash)**: Được giới hạn thực hiện bởi một Pool gồm **Worker Threads = 9** (tối ưu cho CPU đa nhân). Việc giới hạn này ngăn chặn tình trạng tranh chấp CPU (CPU thrashing) và đảm bảo luồng xử lý không làm nghẽn hệ thống.
-*   **Tác vụ CPU-unbound (Giao dịch Cơ sở dữ liệu và Connection Pool)**: Kích thước kết nối tối đa (`maximum-pool-size` của HikariCP) được thiết lập cố định là **50** kết nối (connection-timeout = 5000ms).
+### 12.7. ADR-014: Sử dụng bộ chỉ mục kép tối ưu hóa truy vấn
+*   **Quyết định**: Cấu hình đồng thời hai chỉ mục:
+    1.  Chỉ mục duy nhất bán phần trên mã băm và phòng ban sở hữu đối với tài liệu chưa bị xóa để phục vụ kiểm tra trùng lặp nghiệp vụ.
+    2.  Chỉ mục phụ toàn phần trên mã băm để phục vụ tìm kiếm nhanh tệp tin vật lý trên toàn hệ thống lưu trữ.
+*   **Lý do**: Đảm bảo hiệu năng truy vấn tối ưu khi kiểm tra nghiệp vụ và xử lý Single Instance Storage.

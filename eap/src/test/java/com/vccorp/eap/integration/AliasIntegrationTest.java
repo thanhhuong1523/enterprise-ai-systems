@@ -113,8 +113,8 @@ public class AliasIntegrationTest {
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.success").value(false))
-                .andExpect(jsonPath("$.code").value("ERR_BOARD_PROTECTION"))
-                .andExpect(jsonPath("$.message").value("Không thể chia sẻ tài liệu đến phòng Ban Giám Đốc."));
+                .andExpect(jsonPath("$.error.errorCode").value("ERR_BOARD_PROTECTION"))
+                .andExpect(jsonPath("$.error.message").value("Không thể chia sẻ tài liệu đến phòng Ban Giám Đốc."));
     }
 
     @Test
@@ -138,7 +138,7 @@ public class AliasIntegrationTest {
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.success").value(false))
-                .andExpect(jsonPath("$.code").value("ERR_FORBIDDEN_ROLE"));
+                .andExpect(jsonPath("$.error.errorCode").value("ERR_FORBIDDEN_ROLE"));
     }
 
     @Test
@@ -176,7 +176,6 @@ public class AliasIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.success").value(true))
-                .andExpect(jsonPath("$.code").value("SUCCESS"));
+                .andExpect(jsonPath("$.success").value(true));
     }
 }

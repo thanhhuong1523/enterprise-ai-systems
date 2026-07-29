@@ -15,6 +15,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
@@ -84,26 +85,29 @@ public class FileStorageServiceImpl implements FileStorageService {
      */
     @Override
     public String moveTempToPermanent(Path tempFilePath, String hash) {
+        File storageDir = new File(uploadDir).getAbsoluteFile();
+        if (!storageDir.exists() && !storageDir.mkdirs()) {
+            throw new BusinessException(
+                    ErrorCode.ERR_SYSTEM_ERROR,
+                    "Không thể tạo thư mục lưu trữ."
+            );
+        }
+        Path targetPath = storageDir.toPath().resolve(hash);
+
+        // Pre-check if target file already exists to avoid throwing and catching FileAlreadyExistsException in the common case
+        if (Files.exists(targetPath)) {
+            log.debug("Physical file already exists (pre-check), reuse existing file={}", hash);
+            return targetPath.toAbsolutePath().toString();
+        }
+
         try {
-            File storageDir = new File(uploadDir).getAbsoluteFile();
-            if (!storageDir.exists() && !storageDir.mkdirs()) {
-                throw new BusinessException(
-                        ErrorCode.ERR_SYSTEM_ERROR,
-                        "Không thể tạo thư mục lưu trữ."
-                );
-            }
-            Path targetPath = storageDir.toPath().resolve(hash);
             Files.move(tempFilePath, targetPath, StandardCopyOption.ATOMIC_MOVE);
             log.debug("Atomic rename success: {} -> {}", tempFilePath, targetPath);
             return targetPath.toAbsolutePath().toString();
         } catch (FileAlreadyExistsException ex) {
-            log.debug("Physical file already exists, reuse existing file={}", hash);
-
-            return new File(uploadDir)
-                    .toPath()
-                    .resolve(hash)
-                    .toAbsolutePath()
-                    .toString();
+            log.debug("Physical file already exists (race), reuse existing file={}", hash);
+            deleteTempFileQuietly(tempFilePath);
+            return targetPath.toAbsolutePath().toString();
         } catch (IOException e) {
             // SIS cross-department race: phòng ban khác vừa atomic rename thành công trước.
             // Tệp đích đã có, tệp tạm sẽ được xóa bởi finally block của DocumentServiceImpl (§4.2).
@@ -135,6 +139,18 @@ public class FileStorageServiceImpl implements FileStorageService {
             throw new IOException("Tệp tin vật lý không tồn tại: " + fileReference);
         }
         return Files.readAllBytes(file.toPath());
+    }
+
+    @Override
+    public boolean exists(String fileReference) {
+        if (fileReference == null || fileReference.isBlank()) {
+            return false;
+        }
+        try {
+            return Files.exists(Path.of(fileReference));
+        } catch (InvalidPathException e) {
+            return false;
+        }
     }
 
     private String bytesToHex(byte[] bytes) {

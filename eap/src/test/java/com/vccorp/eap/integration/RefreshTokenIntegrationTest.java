@@ -38,8 +38,8 @@ public class RefreshTokenIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.success").value(false))
-                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"))
-                .andExpect(jsonPath("$.message").value("Refresh Token không được rỗng."));
+                .andExpect(jsonPath("$.error.errorCode").value("ERR_INVALID_REQUEST"))
+                .andExpect(jsonPath("$.error.message").value("Refresh Token không được rỗng."));
     }
 
     @Test
@@ -54,7 +54,7 @@ public class RefreshTokenIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.success").value(false))
-                .andExpect(jsonPath("$.code").value("ERR_UNAUTHENTICATED"));
+                .andExpect(jsonPath("$.error.errorCode").value("ERR_UNAUTHENTICATED"));
     }
 
     @Test

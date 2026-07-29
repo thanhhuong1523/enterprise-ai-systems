@@ -11,6 +11,7 @@ public enum ErrorCode {
     ERR_DOCUMENT_NOT_FOUND(HttpStatus.NOT_FOUND, "Tài liệu yêu cầu không tồn tại."),
     ERR_CONCURRENT_UPLOAD(HttpStatus.TOO_MANY_REQUESTS, "Yêu cầu tải lên tệp tin đang được xử lý đồng thời. Vui lòng thử lại sau."),
     VALIDATION_ERROR(HttpStatus.BAD_REQUEST, "Dữ liệu không hợp lệ."),
+    ERR_INVALID_REQUEST(HttpStatus.BAD_REQUEST, "Thông tin yêu cầu không hợp lệ hoặc định dạng tệp không được hỗ trợ."),
     ERR_SYSTEM_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "Lỗi hệ thống."),
     ERR_DUPLICATE_DOCUMENT(HttpStatus.CONFLICT, "Tài liệu đã tồn tại trong phòng ban.");
 

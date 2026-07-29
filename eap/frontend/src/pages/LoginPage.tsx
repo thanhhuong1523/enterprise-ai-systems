@@ -47,7 +47,7 @@ export const LoginPage: React.FC = () => {
         showToast(response.message || 'Đăng nhập thất bại', 'error');
       }
     } catch (err: any) {
-      const msg = err.response?.data?.message || 'Tên đăng nhập hoặc mật khẩu không chính xác.';
+      const msg = err.response?.data?.error?.message || err.response?.data?.message || 'Tên đăng nhập hoặc mật khẩu không chính xác.';
       showToast(msg, 'error');
     } finally {
       setLoading(false);

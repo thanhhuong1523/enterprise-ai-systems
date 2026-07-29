@@ -46,8 +46,8 @@ public class SecurityConfigTest {
         mockMvc.perform(get("/api/v1/users"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.success").value(false))
-                .andExpect(jsonPath("$.code").value("ERR_UNAUTHENTICATED"))
-                .andExpect(jsonPath("$.message").value("Phiên đăng nhập hết hạn hoặc không hợp lệ."));
+                .andExpect(jsonPath("$.error.errorCode").value("ERR_UNAUTHENTICATED"))
+                .andExpect(jsonPath("$.error.message").value("Phiên đăng nhập hết hạn hoặc không hợp lệ."));
     }
 
     @Test
@@ -58,8 +58,8 @@ public class SecurityConfigTest {
                 .header("Authorization", "Bearer invalid-token"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.success").value(false))
-                .andExpect(jsonPath("$.code").value("ERR_UNAUTHENTICATED"))
-                .andExpect(jsonPath("$.message").value("Phiên đăng nhập hết hạn hoặc không hợp lệ."));
+                .andExpect(jsonPath("$.error.errorCode").value("ERR_UNAUTHENTICATED"))
+                .andExpect(jsonPath("$.error.message").value("Phiên đăng nhập hết hạn hoặc không hợp lệ."));
     }
 
     @Test
@@ -79,8 +79,8 @@ public class SecurityConfigTest {
                 .header("Authorization", "Bearer " + token))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.success").value(false))
-                .andExpect(jsonPath("$.code").value("ERR_FORBIDDEN_ROLE"))
-                .andExpect(jsonPath("$.message").value("Bạn không có quyền thực hiện hành động này."));
+                .andExpect(jsonPath("$.error.errorCode").value("ERR_FORBIDDEN_ROLE"))
+                .andExpect(jsonPath("$.error.message").value("Bạn không có quyền thực hiện hành động này."));
     }
 
     @Test
@@ -118,8 +118,8 @@ public class SecurityConfigTest {
                 .header("Authorization", "Bearer " + token))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.success").value(false))
-                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"))
-                .andExpect(jsonPath("$.message").value("Trường 'id' không đúng định dạng. Yêu cầu kiểu dữ liệu 'UUID'."));
+                .andExpect(jsonPath("$.error.errorCode").value("ERR_INVALID_REQUEST"))
+                .andExpect(jsonPath("$.error.message").value("Trường 'id' không đúng định dạng. Yêu cầu kiểu dữ liệu 'UUID'."));
     }
 
     @Test
@@ -127,7 +127,6 @@ public class SecurityConfigTest {
         mockMvc.perform(get("/api/v1/ping"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
-                .andExpect(jsonPath("$.code").value("SUCCESS"))
                 .andExpect(jsonPath("$.data").value("pong"));
     }
 }

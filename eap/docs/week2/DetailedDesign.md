@@ -5,7 +5,7 @@
 
 ## 1. Thiết kế Phân tách Component & Các Lớp Hỗ trợ (Component Refactoring Design)
 
-Để tuân thủ nghiêm ngặt **Nguyên tắc Đơn trách nhiệm (Single Responsibility Principle - SRP)** và tránh cho `DocumentServiceImpl` trở thành một God Class phức tạp, hệ thống phân tách logic xử lý tải lên thành **3 Lớp Hỗ trợ độc lập (Helper Components)**:
+Để tuân thủ nghiêm ngặt **Nguyên tắc Đơn trách nhiệm (Single Responsibility Principle - SRP)**, logic xử lý tải lên được phân tách thành **3 Lớp Hỗ trợ độc lập (Helper Components)**:
 
 ```text
 com.vccorp.eap.service
@@ -13,60 +13,50 @@ com.vccorp.eap.service
 ├── storage/
 │   ├── FileStorageService.java             # Interface quản lý I/O tệp tin vật lý
 │   └── impl/
-│       └── FileStorageServiceImpl.java     # Implement 1-pass streaming hash SHA-256 & atomic OS rename
+│       └── FileStorageServiceImpl.java     # Triển khai lưu tệp tạm & đổi tên nguyên tử ở tầng hệ điều hành
 │
 ├── lock/
-│   └── DocumentAdvisoryLockHandler.java   # Quản lý khóa cố vấn pg_try_advisory_xact_lock trên JDBC connection
+│   └── DocumentAdvisoryLockHandler.java   # Quản lý khóa cố vấn PostgreSQL cấp giao dịch
 │
 ├── helper/
-│   └── DocumentDeduplicationHelper.java   # Thực thi các câu SQL gộp Aggregate (Fast-Check/Double-Check)
+│   └── DocumentDeduplicationHelper.java   # Thực thi các câu lệnh SQL gộp kiểm tra trùng lặp
 │
 └── impl/
-    └── DocumentServiceImpl.java            # Class điều phối chính (Orchestrator): Validate, Try-Catch & TransactionTemplate
+    └── DocumentServiceImpl.java            # Lớp điều phối chính với vòng lặp thử lại ngoài giao dịch
 ```
 
 ### 1.1. Lớp Quản lý Tệp tin Vật lý (`FileStorageService`)
-* **Gói**: `com.vccorp.eap.service.storage`
 * **Trách nhiệm**:
-  1. `SinglePassStorageResult storeTempFile(InputStream inputStream)`: Đọc stream 1-pass, vừa ghi file tạm ra đĩa `/eap-storage/tmp/temp_<uuid>` vừa tính toán SHA-256 hex hash. Trả về DTO chứa `hash`, `fileSize`, và đường dẫn `tempFilePath`.
-  2. `String moveTempToPermanent(Path tempFilePath, String hash)`: Di chuyển file tạm sang vị trí lưu trữ chính thức `/eap-storage/{hash}` bằng thao tác đổi tên nguyên tử (`Files.move` - atomic rename ở tầng OS). Tự động xử lý ngoại lệ `FileAlreadyExistsException` nếu tệp đã được tạo bởi phòng ban khác.
-  3. `void deleteTempFileQuietly(Path tempFilePath)`: Xóa tệp tạm trong khối `finally` khi xảy ra lỗi hoặc phát hiện tệp trùng lặp.
+  1. `SinglePassStorageResult storeTempFile(InputStream inputStream)`: Đọc HTTP stream 1-pass, vừa ghi file tạm ra đĩa `/eap-storage/tmp/temp_<uuid>` vừa tính toán SHA-256 hex hash. Không đọc InputStream nhiều lần.
+  2. `String moveTempToPermanent(Path tempFilePath, String hash)`: Di chuyển file tạm sang vị trí chính thức `/eap-storage/{hash}` bằng thao tác đổi tên nguyên tử (`Files.move` - atomic rename ở tầng OS). Tự động xử lý ngoại lệ `FileAlreadyExistsException` nếu tệp đã được phòng ban khác di chuyển thành công.
+  3. `boolean exists(String fileReference)`: Kiểm tra sự tồn tại thực tế của tệp tin tại đường dẫn được chỉ định trên đĩa (`Files.exists(Path)`).
+  4. `void deleteTempFileQuietly(Path tempFilePath)`: Xóa tệp tạm trong khối `finally` khi xảy ra lỗi hoặc phát hiện tệp trùng lặp.
 
 ### 1.2. Lớp Quản lý Khóa Cố vấn PostgreSQL (`DocumentAdvisoryLockHandler`)
-* **Gói**: `com.vccorp.eap.service.lock`
 * **Trách nhiệm**:
-  1. `boolean tryAcquireLock(Connection connection, UUID departmentId, String hash)`: Thực thi câu lệnh native SQL `SELECT pg_try_advisory_xact_lock(hashtextextended(concat(departmentId, ':', hash), 0))` trực tiếp trên kết nối JDBC vật lý được ghim trong `TransactionTemplate`. Trả về `true` nếu lấy được khóa.
-  * **Chuẩn hóa Lock ID**:
-    - ownerDepartmentId: UUID.toString()
-    - hash: SHA-256 lowercase
-    - delimiter: ":"
-    - Lock ID: `hashtextextended(concat(ownerDepartmentId, ':', hash), 0)` (BIGINT 64-bit)
-  * **Cơ chế giải phóng khóa (Lock Lifetime)**: Vì sử dụng khóa cố vấn cấp giao dịch `pg_try_advisory_xact_lock(...)`, PostgreSQL sẽ **tự động giải phóng khóa** ngay khi giao dịch kết thúc (Commit hoặc Rollback). Do đó, thiết kế hệ thống **không được** và **không cần** gọi hàm giải phóng khóa thủ công `pg_advisory_unlock(...)`. Lớp này không định nghĩa phương thức `releaseLock`.
-  * **Ranh giới khóa (Lock Boundary)**: Khóa chỉ tồn tại bên trong phạm vi Giao dịch (Transaction). Thao tác thử lại (Retry Loop), thời gian ngủ (Sleep) và thao tác ghi tệp tạm vật lý (File I/O) đều được thực hiện hoàn toàn NẰM NGOÀI Giao dịch. Không giữ khóa ngoài Giao dịch.
-  * **Ghép nối kết nối (Connection Pinning)**: Tất cả câu lệnh SQL trong một Transaction (bao gồm xin khóa, Double-Check, di chuyển tệp vật lý nguyên tử, INSERT metadata) phải sử dụng cùng một physical JDBC Connection. Hệ thống không tạo thêm physical connection phụ nào khác hoặc làm mất Connection Pinning (ghim kết nối) của giao dịch. Nguyên lý này độc lập với thư viện triển khai và không ép buộc sử dụng JdbcTemplate hay DataSourceUtils.
-  * **Phạm vi khóa (Lock Scope)**: Khóa chỉ khóa cặp duy nhất `(ownerDepartmentId, hash)`. Hệ thống không thực hiện khóa trên toàn bảng `documents`, không khóa toàn bộ phòng ban (`ownerDepartmentId`) và không khóa toàn bộ hệ thống lưu trữ (storage).
+  1. `boolean tryAcquireLock(Connection connection, UUID departmentId, String hash)`: Thực thi câu lệnh yêu cầu khóa cố vấn cấp giao dịch trên kết nối JDBC vật lý được ghim trong giao dịch.
+  * **Cơ chế giải phóng khóa**: PostgreSQL tự động giải phóng khóa cố vấn cấp giao dịch ngay khi giao dịch kết thúc (Commit hoặc Rollback). Hệ thống không gọi hàm giải phóng khóa thủ công `pg_advisory_unlock` để loại bỏ nguy cơ rò rỉ khóa.
+  * **Ranh giới khóa**: Khóa chỉ tồn tại bên trong phạm vi Giao dịch. Thao tác thử lại (Retry Loop), thời gian ngủ (Sleep) và thao tác ghi tệp tạm vật lý đều được thực hiện hoàn toàn NẰM NGOÀI Giao dịch.
+  * **Ghim kết nối (Connection Pinning)**: Tất cả câu lệnh SQL trong một Transaction (bao gồm xin khóa, Double-Check, INSERT metadata) phải sử dụng cùng một physical JDBC Connection duy nhất.
+  * **Phạm vi khóa**: Khóa được giới hạn theo cặp thông tin phòng ban và mã băm của tệp tin `(ownerDepartmentId, hash)`. Không thực hiện khóa trên toàn bảng hay toàn phòng ban.
 
 ### 1.3. Lớp Hỗ trợ Truy vấn Gộp (`DocumentDeduplicationHelper`)
-* **Gói**: `com.vccorp.eap.service.helper`
 * **Trách nhiệm**:
-  1. `DeduplicationQueryResult executeAggregateCheck(JdbcTemplate jdbcTemplate, String hash, UUID departmentId)`: Thực thi câu SQL Query 2 (`SELECT bool_or(...), array_agg(...)`) trên kết nối JDBC, trả về POJO chứa 3 thông số: `hasActiveInDept` (boolean), `activeDocId` (UUID), và `oldestFileRef` (String).
+  1. `DeduplicationQueryResult executeAggregateCheck(JdbcTemplate jdbcTemplate, String hash, UUID departmentId)`: Thực thi truy vấn gộp kiểm tra trùng lặp trên kết nối JDBC, trả về đối tượng chứa thông tin trạng thái trùng lặp và đường dẫn tệp vật lý cũ nhất.
 
 ### 1.4. Lớp Điều phối Chính (`DocumentServiceImpl`)
-* **Gói**: `com.vccorp.eap.service.impl`
-* **Trách nhiệm**:
-  * Đóng vai trò **Orchestrator**: Tiêu thụ các bean `FileStorageService`, `DocumentAdvisoryLockHandler`, `DocumentDeduplicationHelper`, và `TransactionTemplate`.
-  * Thực hiện kiểm tra quyền (RBAC), kiểm tra magic bytes qua Apache Tika, gọi Pha 1 (Fast-Check) và Pha 2 (`TransactionTemplate.execute`), trả về DTO `DocumentResponse` bọc trong `ApiResponse<T>`.
+* **Trách nhiệm**: Đóng vai trò Orchestrator phối hợp vòng lặp retry ngoài giao dịch để thực hiện tuần tự hóa, điều phối transaction, validate magic bytes và phân quyền.
 
 ---
 
-## 2. Thiết kế Mô hình Dữ liệu (Database Design)
+## 2. Thiết kế Mô hình Dữ liệu & Chỉ mục (Database Design)
 
 ### 2.1. Cấu trúc bảng `documents` (Siêu dữ liệu tài liệu)
 
-| Tên cột logic | Kiểu dữ liệu logic | Nullable | Ràng buộc / Khóa ngoại | Ý nghĩa nghiệp vụ |
+| Tên cột | Kiểu dữ liệu | Nullable | Ràng buộc / Khóa ngoại | Ý nghĩa nghiệp vụ |
 | :--- | :--- | :--- | :--- | :--- |
-| `id` | UUID | NO | Khóa chính (LSB: 0 = Original, 1 = Alias) | Mã định danh duy nhất của tài liệu. |
-| `business_code` | VARCHAR(50) | NO | UNIQUE | Mã nghiệp vụ thân thiện hiển thị cho người dùng. |
+| `id` | UUID | NO | Khóa chính | Mã định danh duy nhất của tài liệu. |
+| `business_code` | VARCHAR(50) | NO | UNIQUE | Mã nghiệp vụ hiển thị cho người dùng. |
 | `title` | VARCHAR(255) | NO | | Tiêu đề hiển thị của tài liệu. |
 | `file_reference` | VARCHAR(512) | YES | | Đường dẫn lưu trữ vật lý của file trên đĩa (null đối với alias). |
 | `file_size` | BIGINT | YES | | Dung lượng tệp tính bằng byte (null đối với alias). |
@@ -80,24 +70,14 @@ com.vccorp.eap.service
 | `deleted_at` | TIMESTAMP | YES | | Thời điểm xóa mềm tài liệu. |
 
 ### 2.2. Thiết kế Chỉ mục (Index Design)
-Hệ thống sử dụng **hai chỉ mục** độc lập phục vụ cho các mục đích nghiệp vụ khác nhau:
-
-1.  **Chỉ mục duy nhất bán phần (uq_documents_hash_dept)**:
-    *   *Mục đích*: Bảo vệ tính duy nhất, chống ghi trùng lặp tài liệu hoạt động trong phòng ban.
-    *   *SQL*:
-        ```sql
-        CREATE UNIQUE INDEX uq_documents_hash_dept ON documents(hash, owner_department_id) WHERE deleted_at IS NULL;
-        ```
-2.  **Chỉ mục phụ toàn phần trên mã băm (idx_documents_hash)**:
-    *   *Mục đích*: Tối ưu hóa truy vấn tìm kiếm toàn cục theo `hash` để tái sử dụng tệp vật lý (SIS). Vì luồng SIS cần quét trên cả các tài liệu đã bị xóa mềm, chỉ mục này không chứa điều kiện `deleted_at IS NULL`.
-    *   *SQL*:
-        ```sql
-        CREATE INDEX idx_documents_hash ON documents(hash);
-        ```
+Hệ thống sử dụng ba chỉ mục để tối ưu hóa truy vấn:
+1.  **Chỉ mục duy nhất bán phần (uq_documents_hash_dept)**: Đảm bảo chống trùng lặp tài liệu hoạt động trong cùng phòng ban ở tầng vật lý.
+2.  **Chỉ mục phụ toàn phần trên mã băm (idx_documents_hash)**: Tối ưu hóa việc quét tìm kiếm tệp vật lý cũ nhất trên toàn hệ thống lưu trữ phục vụ Single Instance Storage (SIS).
+3.  **Chỉ mục phụ phục vụ truy vấn theo phòng ban (idx_documents_owner_dept_deleted)**: Tối ưu hóa việc tìm kiếm và lọc danh sách tài liệu đang hoạt động thuộc sở hữu của một phòng ban cụ thể.
 
 ---
 
-## 3. Đặc tả API (API Design)
+## 3. Đặc tả API & Phản hồi (API Design)
 
 ### 3.1. API POST /api/v1/original-documents
 *   **Method**: `POST`
@@ -105,370 +85,380 @@ Hệ thống sử dụng **hai chỉ mục** độc lập phục vụ cho các m
 *   **Tham số Request**:
     *   `title` (Chuỗi ký tự, bắt buộc, độ dài từ 1 đến 255 ký tự).
     *   `file` (Dữ liệu tệp nhị phân, bắt buộc, dung lượng tối đa 50MB).
-*   **Các quy tắc validation đầu vào**:
-    *   Tiêu đề không được để trống hoặc chỉ chứa khoảng trắng.
-    *   Dung lượng file tải lên phải lớn hơn 0 và nhỏ hơn hoặc bằng 50MB.
-    *   Định dạng tệp thực tế phải thuộc danh sách được hỗ trợ (`application/pdf`, `application/vnd.openxmlformats-officedocument.wordprocessingml.document`, v.v.) bằng cách kiểm tra cấu trúc nhị phân của tệp (magic bytes) qua thư viện phân tích cấu trúc nhị phân độc lập.
 
-### 3.2. Đặc tả Phản hồi API (API Response Design - Standardized ApiResponse Envelope)
+### 3.2. Cấu trúc Phản hồi API (API Response Envelope)
 
-#### Trường hợp 201 Created (Tạo tài liệu thành công)
-Hệ thống trả về HTTP 201 Created khi:
-  * Tệp hoàn toàn mới trong hệ thống.
-  * Tệp vật lý đã tồn tại nhưng trong phòng ban chưa có tài liệu hoạt động (bao gồm trường hợp chỉ còn bản ghi đã xóa mềm).
-Trong cả hai trường hợp, hệ thống đều tạo một bản ghi tài liệu mới và trả về metadata của bản ghi vừa được tạo.
-
-```json
-{
-  "success": true,
-  "data": {
-    "id": "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a10",
-    "businessCode": "ORIG_00100042",
-    "title": "Báo cáo doanh thu quý 2",
-    "ownerDepartmentId": "b2f63f58-5d29-45e0-8151-24db58804791",
-    "fileSize": 120540,
-    "hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "parentId": null,
-    "creatorDepartmentId": null,
-    "createdBy": "c3d9a184-7a2e-4b48-8df3-bf7b1348a27b",
-    "createdAt": "2026-07-09T15:30:00",
-    "updatedAt": null
-  },
-  "error": null
-}
-```
-
-#### Trường hợp 409 Conflict (Tài liệu đã tồn tại)
-Hệ thống trả về HTTP 409 Conflict khi trong cùng phòng ban đã tồn tại một tài liệu hoạt động (deleted_at IS NULL) có cùng nội dung tệp.
-  * Không tạo bản ghi mới.
-  * Không ghi đè tiêu đề.
-  * Không trả metadata của tài liệu đã tồn tại.
-```json
-{
-  "success": false,
-  "data": null,
-  "error": {
-    "errorCode": "ERR_DUPLICATE_DOCUMENT",
-    "message": "Tài liệu có cùng nội dung đã tồn tại trong phòng ban."
-  }
-}
-```
-
-
-#### Trường hợp 429 Too Many Requests (Không lấy được Advisory Lock sau số lần retry tối đa)
-```json
-{
-  "success": false,
-  "data": null,
-  "error": {
-    "errorCode": "ERR_CONCURRENT_UPLOAD",
-    "message": "Yêu cầu tải lên tệp tin đang được xử lý đồng thời. Vui lòng thử lại sau."
-  }
-}
-```
+*   **HTTP 201 Created (Thành công tải lên mới hoặc tái sử dụng file vật lý)**:
+    ```json
+    {
+      "success": true,
+      "data": {
+        "id": "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a10",
+        "businessCode": "ORIG_00100042",
+        "title": "Báo cáo doanh thu quý 2",
+        "ownerDepartmentId": "b2f63f58-5d29-45e0-8151-24db58804791",
+        "fileSize": 120540,
+        "hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "parentId": null,
+        "creatorDepartmentId": null,
+        "createdBy": "c3d9a184-7a2e-4b48-8df3-bf7b1348a27b",
+        "createdAt": "2026-07-09T15:30:00",
+        "updatedAt": null
+      },
+      "error": null
+    }
+    ```
+*   **HTTP 400 Bad Request (Yêu cầu tải lên không hợp lệ, tiêu đề trống, dung lượng tệp vượt giới hạn hoặc định dạng/magic bytes không được hỗ trợ)**:
+    ```json
+    {
+      "success": false,
+      "data": null,
+      "error": {
+        "errorCode": "ERR_INVALID_REQUEST",
+        "message": "Thông tin yêu cầu không hợp lệ hoặc định dạng tệp không được hỗ trợ."
+      }
+    }
+    ```
+*   **HTTP 409 Conflict (Tài liệu hoạt động đã tồn tại trong phòng ban)**:
+    ```json
+    {
+      "success": false,
+      "data": null,
+      "error": {
+        "errorCode": "ERR_DUPLICATE_DOCUMENT",
+        "message": "Tài liệu có cùng nội dung đã tồn tại trong phòng ban."
+      }
+    }
+    ```
+*   **HTTP 429 Too Many Requests (Không lấy được Advisory Lock sau retry tối đa hoặc cạn kiệt kết nối tạm thời)**:
+    ```json
+    {
+      "success": false,
+      "data": null,
+      "error": {
+        "errorCode": "ERR_CONCURRENT_UPLOAD",
+        "message": "Yêu cầu tải lên tệp tin đang được xử lý đồng thời. Vui lòng thử lại sau."
+      }
+    }
+    ```
+*   **HTTP 500 Internal Server Error (Lỗi lưu trữ vật lý hoặc lỗi kết nối/vận hành cơ sở dữ liệu)**:
+    ```json
+    {
+      "success": false,
+      "data": null,
+      "error": {
+        "errorCode": "ERR_INTERNAL_SERVER_ERROR",
+        "message": "Đã xảy ra lỗi hệ thống. Vui lòng liên hệ quản trị viên."
+      }
+    }
+    ```
 
 ---
 
-## 4. Quy trình Xử lý Nghiệp vụ Chi tiết (Detailed Workflows)
+## 4. Quy trình Xử lý & Workflows (Detailed Workflows)
 
-### 4.1. Thuật toán Hashing & Lưu tệp tạm thời 1-pass (Single-Pass Storage & Hashing)
-Nhằm tránh việc đọc file hai lần gây lãng phí tài nguyên I/O đĩa cứng, hệ thống áp dụng luồng xử lý như sau:
-1.  API tiếp nhận tệp tin dưới dạng luồng dữ liệu (`InputStream`).
-2.  Khởi tạo bộ xử lý tính toán mã băm mật mã (SHA-256) và luồng ghi tệp tạm thời.
-3.  Vừa đọc luồng dữ liệu đầu vào vừa ghi trực tiếp vào một tệp tạm thời trong thư mục `/eap-storage/tmp` (được cấu hình cùng mount point mạng dùng chung với thư mục đích), đồng thời cập nhật trạng thái của bộ tính toán mã băm cho mỗi khối đệm dữ liệu (kích thước đệm khuyến nghị: 8KB).
-4.  Khi luồng dữ liệu đọc hết, hoàn tất quá trình ghi tệp tạm thời và kết xuất chuỗi Hex đại diện cho mã băm SHA-256.
-5.  Phương pháp này đảm bảo chỉ đọc dữ liệu nhị phân của tệp tin đúng một lần duy nhất.
+### 4.1. Hashing & Lưu tệp tạm thời 1-pass
+1.  Đầu vào là `InputStream` của file từ HTTP.
+2.  Khởi tạo bộ xử lý ghi đĩa `FileOutputStream` hướng tới `/eap-storage/tmp/temp_<uuid>` bọc trong `MessageDigest` (SHA-256).
+3.  Vừa đọc luồng dữ liệu đầu vào (buffer 8KB) vừa ghi trực tiếp vào tệp tạm thời, đồng thời cập nhật `MessageDigest`. Không đọc InputStream nhiều lần (One-Pass Processing).
+4.  Khi kết thúc stream, đóng các luồng dữ liệu, sinh chuỗi Hex SHA-256 đại diện cho file.
+5.  Thực hiện validate magic bytes qua file tạm thời vừa ghi trên đĩa.
 
-### 4.2. Cấu trúc Phân tách Giao dịch & Tối ưu hóa Khóa
-Logic nghiệp vụ được phân tách thành hai giai đoạn nhằm giảm thời gian giữ giao dịch cơ sở dữ liệu và đảm bảo tính nhất quán khi xử lý đồng thời:
-  *  Ngoài giao dịch (Non-Transactional): Validation, Hashing, lưu tệp tạm, Fast-Check và Retry lấy Advisory Lock.
-  *  Trong giao dịch (Transactional): Double-Check, xử lý lưu trữ vật lý và ghi nhận bản ghi tài liệu mới.
+### 4.2. Cấu trúc Giao dịch & Quản lý Khóa (Single-Connection Pattern)
 
 #### Phương thức chính (Ngoài Giao dịch - Non-Transactional)
-1.  Nhận tiêu đề, tệp tin và thông tin người dùng.
-2.  Thực hiện validation vai trò và định dạng tệp tin.
-3.  Gọi bộ xử lý "Hashing & Lưu tệp tạm thời 1-pass" (§4.1) để lấy mã băm `hash` và tệp tạm `tempFile` tại `/eap-storage/tmp/temp_uuid`.
-4.  **Bảo vệ tài nguyên bằng khối Try-Finally**: Toàn bộ luồng xử lý từ bước này phải nằm trong khối `try-finally` để đảm bảo dọn dẹp file tạm.
-5.  **Fast-Check (Ngoài Giao dịch)**: Thực thi **Truy vấn gộp Aggregate (Query 2)**.
-    *   Nếu `hasActiveInDept` trả về `true`: Huỷ tệp tạm, kết thúc xử lý và trả về HTTP 409 Conflict.
-6.  **Vòng lặp thử lại Advisory Lock (Retry Loop ngoài Giao dịch — không giữ Connection)**: Nếu chưa phát hiện tài liệu hoạt động trùng lặp, thực hiện vòng lặp thử lấy Advisory Lock:
-    *   Nếu chưa lấy được khóa, kết thúc giao dịch hiện tại, chờ theo chính sách Retry và thử lại.
-    *   Sau tối đa 5 lần thử vẫn không lấy được khóa, trả về HTTP 429 Too Many Requests.
-7.  Khi lấy được khóa thành công, chuyển sang luồng xử lý trong giao dịch.
-8.  Sau khi kết thúc xử lý (thành công hoặc lỗi), hệ thống phải bảo đảm tệp tạm được dọn dẹp nếu chưa được di chuyển sang vị trí lưu trữ chính thức.
+1.  Validate đầu vào, vai trò người dùng (RBAC).
+2.  Thực hiện "Hashing & Lưu tệp tạm thời 1-pass" để lấy `hash` và đường dẫn file tạm `tempFile`.
+3.  **Khối Try-Finally bắt đầu**: Dùng để đảm bảo dọn dẹp file tạm.
+4.  **Fast-Check (Ngoài Giao dịch)**: Thực thi **Query 2** (Truy vấn gộp Aggregate).
+    *   Nếu `hasActiveInDept` là `true`: Xóa file tạm, ném `DuplicateDocumentException` (HTTP 409).
+5.  **Vòng lặp thử lại (Retry Loop ngoài Transaction)**:
 
-#### Phương thức Giao dịch (Trong Giao dịch - Transactional — Single-Connection Pattern)
+#### Chi tiết Retry Strategy (Jittered Exponential Backoff ngoài Transaction)
+Retry Loop hoạt động ngoài phạm vi giao dịch cơ sở dữ liệu để tránh chiếm giữ kết nối DB trong lúc ngủ (sleep):
+*   **Cấu hình**:
+    *   `retry.maxAttempts`: Số lần thử tối đa (đọc từ cấu hình ngoài).
+    *   `retry.baseDelay`: Thời gian chờ cơ sở (đọc từ cấu hình ngoài).
+    *   `retry.maxDelay`: Thời gian chờ tối đa (đọc từ cấu hình ngoài).
+*   **Workflow**:
+```text
+Retry Loop (attempts < maxAttempts)
+│
+├──> Begin Transaction (Mở kết nối JDBC mới)
+│     │
+│     ├──> Acquire Lock (Yêu cầu khóa cố vấn 64-bit trên kết nối)
+│     │     │
+│     │     ├──> [THẤT BẠI] -> Rollback Transaction -> Đóng kết nối -> Sleep (Backoff) -> Tiếp tục Loop
+│     │     │
+│     │     └──> [THÀNH CÔNG] -> Thực thi Double-Check
+│     │           │
+│     │           ├──> [Double-Check TRÙNG] -> Rollback -> Đóng kết nối -> Trả lỗi HTTP 409 (Thoát)
+│     │           │
+│     │           └──> [Double-Check SẠCH] -> INSERT Metadata -> Move File -> Commit -> Trả HTTP 201 (Thoát)
+│     │
+│     └──> Bất kỳ lỗi hệ thống nào khác -> Rollback -> Đóng kết nối -> Trả lỗi HTTP 500 (Thoát)
+│
+└──> Hết số lần retry -> Trả lỗi HTTP 429 (Too Many Requests)
+```
+*   **Công thức tính Jittered Delay**:
+    $$Delay_{temp} = \min(	ext{maxDelay}, 	ext{baseDelay} 	imes 2^{	ext{attempt}})$$
+    $$Delay = Delay_{temp} \pm 	ext{random\_jitter}$$
 
-> Toàn bộ luồng từ bước này được thực thi bên trong một `TransactionTemplate.execute()` duy nhất, sử dụng **1 kết nối JDBC vật lý được ghim cố định**. `pg_try_advisory_xact_lock` là transaction-level lock — được PostgreSQL **tự động giải phóng** khi giao dịch commit hoặc rollback. 
+#### Phương thức Giao dịch (Trong Giao dịch - Transactional)
+Được bọc trong giao dịch ngắn hạn trên một kết nối JDBC được ghim cố định:
+1.  Thực thi yêu cầu khóa cố vấn 64-bit không chặn (Query 1).
+    *   Nếu trả về `false`: Rollback ngay lập tức và trả về tín hiệu `LOCK_BUSY` để vòng lặp ngoài tiến hành Sleep và Retry.
+2.  **Double-Check** (Query 2):
+    *   Nếu `hasActiveInDept` là `true`: Rollback ngay lập tức và ném `DuplicateDocumentException` (Trả về HTTP 409).
+3.  **Persist Metadata**:
+    *   Thực thi câu SQL INSERT metadata tài liệu (Query 3), sinh `business_code` nguyên tử từ PostgreSQL sequence.
+4.  **Xử lý lưu trữ vật lý (Move Physical File)**:
+    *   Nếu `oldestFileRef` không rỗng: Tiến hành kiểm tra sự tồn tại thực tế của tệp tin tại đường dẫn `oldestFileRef` bằng `FileStorageService.exists()`.
+        *   Nếu tệp tin vật lý TỒN TẠI: Đánh dấu tệp tạm cần dọn dẹp, tái sử dụng đường dẫn `oldestFileRef`.
+        *   Nếu tệp tin vật lý KHÔNG TỒN TẠI: Thực hiện như trường hợp `oldestFileRef` rỗng (di chuyển tệp tạm sang vị trí lưu trữ chính thức `/eap-storage/{hash}`).
+    *   Nếu `oldestFileRef` rỗng: Tiến hành di chuyển tệp tạm sang vị trí lưu trữ chính thức `/eap-storage/{hash}` bằng lệnh `Files.move` (OS atomic rename).
+        *   *Xử lý đụng độ ghi file vật lý liên phòng ban*: Nếu file đích đã tồn tại (do phòng ban khác vừa rename thành công trước đó vài phần mười giây), hệ điều hành sẽ ném ra `FileAlreadyExistsException`. Tiến hành bắt ngoại lệ này, đánh dấu file tạm cần dọn dẹp, và tiếp tục sử dụng đường dẫn đích có sẵn.
+5.  Commit giao dịch (PostgreSQL tự động giải phóng khóa cố vấn cấp giao dịch).
 
-1.  Khởi chạy khối `TransactionTemplate.execute(...)` — kết nối JDBC vật lý A được ghim cho toàn bộ khối.
-2.  Thực thi `SELECT pg_try_advisory_xact_lock(hashtextextended(...))` (Query 1) trên kết nối A.
-    *   Nếu trả về `false`: Rollback ngay (PostgreSQL giải phóng lock), trả về `LOCK_BUSY` signal. Vòng lặp bên ngoài sẽ ngủ và retry.
-3.  **Double-Check** (Query 2):
-    *   Nếu hasActiveInDept = true, rollback giao dịch, hủy tệp tạm và trả về HTTP 409 Conflict.
-4.  **Xử lý lưu trữ vật lý**:
-    *   Nếu `oldestFileRef` không rỗng: Tái sử dụng liên kết tệp vật lý cũ nhất này, đồng thời báo hiệu để khối `finally` xóa tệp tạm `tempFile`.
-    *   Nếu `oldestFileRef` rỗng (tệp vật lý chưa từng tồn tại): Di chuyển tệp tạm `tempFile` vào đường dẫn lưu trữ chính thức đặt tên theo mã băm (`/eap-storage/{hash}`) bằng thao tác đổi tên tệp tức thời (atomic rename ở tầng hệ điều hành).
-        *   *Lưu ý xử lý xung đột liên phòng ban*: Nếu phát hiện lỗi tệp đích đã tồn tại (do phòng ban khác chạy song song vừa thực hiện rename thành công), tiến hành bắt ngoại lệ `FileAlreadyExistsException`, báo hiệu để khối `finally` tự động hủy tệp tạm `tempFile` và tái sử dụng đường dẫn tệp đích đã có.
-5.  Thực hiện **Truy vấn thêm bản ghi mới (Query 3)** để lưu siêu dữ liệu tài liệu mới vào cơ sở dữ liệu.
-6.  Kết thúc giao dịch (Commit). PostgreSQL tự động giải phóng `pg_try_advisory_xact_lock`. Trả về siêu dữ liệu vừa tạo — **HTTP 201 Created**.
-7.  **Xử lý ngoại lệ**
-  *   Nếu xảy ra lỗi vi phạm ràng buộc duy nhất (DataIntegrityViolationException) do các tình huống đồng thời ngoài dự kiến, rollback giao dịch và trả về HTTP 409 Conflict.
-  *   Mọi ngoại lệ khác phải rollback giao dịch, dọn dẹp tệp tạm (nếu còn tồn tại) và được xử lý theo cơ chế Global Exception Handler của hệ thống.
+#### Khối Dọn dẹp Cuối cùng (finally block)
+*   Thực hiện xóa file tạm `tempFile` trên đĩa nếu nó chưa được di chuyển sang thư mục chính thức thành công.
 
-#### Khối Dọn dẹp Cuối cùng (Khối Finally của Phương thức chính)
-*   **Xóa tệp tạm**: Nếu tệp tạm `tempFile` vẫn tồn tại trên đĩa và luồng xử lý chưa đánh dấu di chuyển tệp thành công → Thực hiện xóa tệp tạm `tempFile` ngay lập tức để giải phóng tài nguyên đĩa.
-*   **Lưu ý**: Vì dùng `pg_try_advisory_xact_lock` (transaction-level), PostgreSQL **tự động giải phóng** khóa khi giao dịch kết thúc. Khối `finally` **không cần** gọi `pg_advisory_unlock` thủ công.
+---
 
-### 4.3. Sơ đồ Tuần tự Xử lý Đồng thời (Mermaid Sequence Diagram)
-Dưới đây là sơ đồ mô tả chi tiết luồng xử lý khi có hai yêu cầu tải trùng tệp được gửi lên đồng thời bởi hai người dùng trong cùng một phòng ban:
+### 4.3. Sơ đồ Tuần tự (Sequence Diagrams)
 
-> **Business Requirement**: Luồng tạo mới trả về HTTP 201 Created. Các luồng phát hiện tài liệu đã tồn tại trả về HTTP 409 Conflict.
-
+#### Sơ đồ Tuần tự Tải đồng thời trong cùng một Phòng ban (SLA 1)
 ```mermaid
 sequenceDiagram
     autonumber
+    actor UserA as Người dùng A (Dept 1)
+    actor UserB as Người dùng B (Dept 1)
+    participant Service as DocumentServiceImpl (Orchestrator)
+    participant Lock as DocumentAdvisoryLockHandler
+    participant DB as PostgreSQL
+    participant Storage as FileStorageService
 
-    actor UserA as Người dùng A
-    actor UserB as Người dùng B
-
-    participant API
-    participant Service
-    participant DB
-    participant Storage
-
-    par Request 1
-        UserA->>API: POST Upload
-        API->>Service: Upload
-        Service->>Storage: Hash + lưu file tạm
-        Service->>DB: Fast-Check
-        DB-->>Service: Không tồn tại
-    and Request 2
-        UserB->>API: POST Upload
-        API->>Service: Upload
-        Service->>Storage: Hash + lưu file tạm
-        Service->>DB: Fast-Check
-        DB-->>Service: Không tồn tại
+    par Request A (Tải trước vài ms)
+        UserA->>Service: Upload File X (title="Doc A")
+        Service->>Storage: 1-pass ghi file tạm & tính hash X
+        Service->>DB: Fast-Check (Query 2)
+        DB-->>Service: has_active_in_dept = false
+    and Request B
+        UserB->>Service: Upload File X (title="Doc B")
+        Service->>Storage: 1-pass ghi file tạm & tính hash X
+        Service->>DB: Fast-Check (Query 2)
+        DB-->>Service: has_active_in_dept = false
     end
 
-    Note over Service,DB: Request 1 lấy Advisory Lock trước
+    Note over Service,Lock: Request A mở giao dịch ngắn hạn & xin khóa
+    Service->>Lock: tryAcquireLock(Conn A)
+    Lock->>DB: Yêu cầu khóa cố vấn 64-bit (Query 1)
+    DB-->>Lock: true (Acquired)
+    Lock-->>Service: true
 
-    Service->>DB: Double-Check
-    DB-->>Service: Không tồn tại
+    Note over Service,Lock: Request B mở giao dịch ngắn hạn & xin khóa
+    Service->>Lock: tryAcquireLock(Conn B)
+    Lock->>DB: Yêu cầu khóa cố vấn 64-bit (Query 1)
+    DB-->>Lock: false (Locked by Conn A)
+    Lock-->>Service: false (LOCK_BUSY)
+    
+    Note over Service: Request B rollback ngay, đóng Conn B & bắt đầu Sleep Retry ngoài Transaction
 
-    Service->>Storage: Tái sử dụng file vật lý hoặc tạo file mới
-    Service->>DB: INSERT metadata
+    Service->>DB: Double-Check (Query 2 - Conn A)
+    DB-->>Service: has_active_in_dept = false, oldest_file_ref = null
+    Service->>DB: INSERT metadata (Query 3 - Conn A)
+    DB-->>Service: Thành công (business_code="ORIG_00100042")
+    Service->>Storage: moveTempToPermanent (Atomic OS rename)
+    Storage-->>Service: Thành công (/eap-storage/X)
+    Service->>DB: Commit (Conn A)
+    Note over DB: Giải phóng Advisory Lock tự động
+    Service-->>UserA: HTTP 201 Created
+
+    Note over Service: Request B hết thời gian sleep, mở Conn B2 & thử lại
+    Service->>Lock: tryAcquireLock(Conn B2)
+    Lock->>DB: Yêu cầu khóa cố vấn 64-bit (Query 1)
+    DB-->>Lock: true (Acquired)
+    Lock-->>Service: true
+
+    Service->>DB: Double-Check (Query 2 - Conn B2)
+    DB-->>Service: has_active_in_dept = true (Vừa được tạo bởi Request A)
+    Service->>DB: Rollback (Conn B2)
+    Note over DB: Giải phóng Advisory Lock tự động
+    Service->>Storage: deleteTempFileQuietly (Xóa file tạm của Request B)
+    Service-->>UserB: HTTP 409 Conflict (Duplicate Document)
+```
+
+#### Sơ đồ Tuần tự Tải đồng thời liên Phòng ban (SIS Write Conflict)
+```mermaid
+sequenceDiagram
+    autonumber
+    actor UserA as Người dùng Dept A
+    actor UserB as Người dùng Dept B
+    participant Service as DocumentServiceImpl
+    participant Lock as DocumentAdvisoryLockHandler
+    participant DB as PostgreSQL
+    participant Storage as FileStorageService
+
+    Note over Service,DB: Cả hai phòng ban tải cùng file X (chưa tồn tại trên hệ thống)
+    par Dept A Upload
+        UserA->>Service: Upload File X
+        Service->>Storage: 1-pass ghi file tạm A
+        Service->>DB: Fast-Check (Query 2)
+        DB-->>Service: has_active_in_dept = false
+    and Dept B Upload
+        UserB->>Service: Upload File X
+        Service->>Storage: 1-pass ghi file tạm B
+        Service->>DB: Fast-Check (Query 2)
+        DB-->>Service: has_active_in_dept = false
+    end
+
+    Note over Service,DB: Do ID phòng ban khác nhau, cả hai đều lấy được Advisory Lock song song
+    par Dept A Lock
+        Service->>Lock: tryAcquireLock(Conn A)
+        Lock->>DB: Yêu cầu khóa cố vấn (Query 1)
+        DB-->>Lock: true
+    and Dept B Lock
+        Service->>Lock: tryAcquireLock(Conn B)
+        Lock->>DB: Yêu cầu khóa cố vấn (Query 1)
+        DB-->>Lock: true
+    end
+
+    Service->>DB: Double-Check (Conn A)
+    DB-->>Service: has_active_in_dept = false, oldest_file_ref = null
+    Service->>DB: Double-Check (Conn B)
+    DB-->>Service: has_active_in_dept = false, oldest_file_ref = null
+
+    Service->>DB: INSERT metadata (Dept A - Conn A)
+    DB-->>Service: Thành công
+    Service->>DB: INSERT metadata (Dept B - Conn B)
     DB-->>Service: Thành công
 
-    Service-->>API: HTTP 201 Created
-    API-->>UserA: 201 Created
+    Note over Storage: Cả hai cùng thực hiện di chuyển tệp
+    Service->>Storage: moveTempToPermanent (File tạm A)
+    Storage-->>Service: Thành công (lưu tại /eap-storage/X)
 
-    Note over Service: Request 2 Retry lấy Advisory Lock
+    Service->>Storage: moveTempToPermanent (File tạm B)
+    Note over Storage: Tệp /eap-storage/X đã tồn tại
+    Storage-->>Service: FileAlreadyExistsException (Bắt ngoại lệ)
+    Note over Service: Đánh dấu file tạm B cần dọn dẹp, tái sử dụng /eap-storage/X
 
-    Service->>DB: Double-Check
-    DB-->>Service: Đã tồn tại
+    Service->>DB: Commit (Conn A)
+    Service-->>UserA: HTTP 201 Created
+    
+    Service->>DB: Commit (Conn B)
+    Service-->>UserB: HTTP 201 Created
 
-    Service->>Storage: Xóa file tạm
-
-    Service-->>API: HTTP 409 Conflict
-    API-->>UserB: 409 Conflict
+    Note over Service: Dọn dẹp file tạm B trong khối finally
+    Service->>Storage: deleteTempFileQuietly (File tạm B)
 ```
 
-#### Sơ đồ Tuần tự: Đụng độ ghi file vật lý giữa các phòng ban
-
-Sơ đồ dưới đây mô tả trường hợp hai phòng ban khác nhau đồng thời tải lên cùng một nội dung tệp tin.
-
-Do Advisory Lock chỉ đồng bộ trong phạm vi từng phòng ban nên hai giao dịch có thể xử lý song song. Hệ thống bảo đảm chỉ tạo một tệp vật lý duy nhất, trong khi mỗi phòng ban vẫn có bản ghi tài liệu độc lập của mình.
-
-```mermaid
-sequenceDiagram
-    autonumber
-
-    actor UserA as Phòng ban A
-    actor UserB as Phòng ban B
-
-    participant ServiceA
-    participant ServiceB
-    participant DB
-    participant Storage
-
-    par Department A
-        UserA->>ServiceA: Upload File X
-        ServiceA->>DB: Fast-Check
-        DB-->>ServiceA: Không tồn tại
-    and Department B
-        UserB->>ServiceB: Upload File X
-        ServiceB->>DB: Fast-Check
-        DB-->>ServiceB: Không tồn tại
-    end
-
-    Note over ServiceA,ServiceB: Hai giao dịch xử lý độc lập
-
-    ServiceA->>DB: Double-Check
-    DB-->>ServiceA: Không tồn tại
-
-    ServiceB->>DB: Double-Check
-    DB-->>ServiceB: Không tồn tại
-
-    par Ghi file vật lý
-        ServiceA->>Storage: Lưu file vật lý
-        Storage-->>ServiceA: Thành công
-    and
-        ServiceB->>Storage: Lưu file vật lý
-        Storage-->>ServiceB: File đã tồn tại
-        ServiceB->>Storage: Tái sử dụng file vật lý
-    end
-
-    ServiceA->>DB: INSERT metadata (Dept A)
-    DB-->>ServiceA: Thành công
-
-    ServiceB->>DB: INSERT metadata (Dept B)
-    DB-->>ServiceB: Thành công
-
-    ServiceA-->>UserA: HTTP 201 Created
-    ServiceB-->>UserB: HTTP 201 Created
-```
-
-#### Sơ đồ Tuần tự: Xử lý ngoại lệ vi phạm UNIQUE (Defensive Failsafe)
-
-Sơ đồ dưới đây mô tả cơ chế xử lý dự phòng khi xảy ra lỗi vi phạm ràng buộc duy nhất ngoài dự kiến trong quá trình ghi dữ liệu. Đây không phải luồng nghiệp vụ thông thường mà là lớp bảo vệ cuối cùng nhằm đảm bảo dữ liệu luôn nhất quán.
-
-```mermaid
-sequenceDiagram
-    autonumber
-
-    actor User
-    participant Service
-    participant DB
-    participant Storage
-
-    User->>Service: Upload File
-
-    Service->>DB: Double-Check
-    DB-->>Service: Không tồn tại
-
-    Service->>Storage: Lưu hoặc tái sử dụng file vật lý
-
-    Service->>DB: INSERT metadata
-
-    DB-->>Service: UNIQUE constraint violation
-
-    Service->>DB: Rollback
-
-    Service->>Storage: Xóa file tạm (nếu còn)
-
-    Service-->>User: HTTP 409 Conflict
-```
-
+---
 
 ### 4.4. Sơ đồ Hoạt động Chi tiết (Mermaid Activity Diagram)
-
-Sơ đồ dưới đây mô tả toàn bộ luồng xử lý tải lên tài liệu từ khi tiếp nhận yêu cầu đến khi tạo bản ghi hoặc phát hiện tài liệu trùng lặp.
-
-> **Business Requirement**
->
-> * Nếu tạo mới tài liệu thành công, hệ thống trả về **HTTP 201 Created**.
-> * Nếu phát hiện tài liệu đang hoạt động đã tồn tại trong cùng phòng ban, hệ thống trả về **HTTP 409 Conflict**.
-
 ```mermaid
 flowchart TD
-
-Start([Bắt đầu Upload])
-
-Start --> Validate{Validation}
-
-Validate -- Không hợp lệ --> Return400[HTTP 400 Bad Request]
-
-Validate -- Hợp lệ --> Hash[Hash + Lưu file tạm]
-
-Hash --> FastCheck{Fast-Check}
-
-FastCheck -- Đã tồn tại --> DeleteTemp1[Xóa file tạm]
-DeleteTemp1 --> Return409A[HTTP 409 Conflict]
-
-FastCheck -- Chưa tồn tại --> Retry[Retry lấy Advisory Lock]
-
-Retry --> Lock{Lấy được Lock?}
-
-Lock -- Không --> RetryCount{Retry còn?}
-
-RetryCount -- Có --> Retry
-
-RetryCount -- Hết --> DeleteTemp2[Xóa file tạm]
-DeleteTemp2 --> Return429[HTTP 429 Too Many Requests]
-
-Lock -- Có --> DoubleCheck{Double-Check}
-
-DoubleCheck -- Đã tồn tại --> Rollback[Rollback]
-Rollback --> DeleteTemp3[Xóa file tạm]
-DeleteTemp3 --> Return409B[HTTP 409 Conflict]
-
-DoubleCheck -- Chưa tồn tại --> Storage{Đã có file vật lý?}
-
-Storage -- Có --> Reuse[Tái sử dụng file vật lý]
-
-Storage -- Chưa --> Move[Di chuyển file tạm]
-
-Reuse --> Insert[INSERT Metadata]
-
-Move --> Insert
-
-Insert --> Commit[Commit]
-
-Commit --> Return201[HTTP 201 Created]
+    Start([Bắt đầu Tải lên]) --> Recv[Stage 1: Nhận HTTP Stream]
+    Recv --> WriteTemp[Stage 2: Ghi file tạm & Tính SHA-256 1-pass]
+    WriteTemp --> ValidateMagic{Stage 3: Validate Magic Bytes?}
+    
+    ValidateMagic -- Không hợp lệ --> DeleteTempBad[Xóa file tạm]
+    DeleteTempBad --> Return400[HTTP 400 Bad Request]
+    
+    ValidateMagic -- Hợp lệ --> FastCheck{Stage 4: Fast-Check ngoài Transaction?}
+    
+    FastCheck -- Đã tồn tại trong Dept --> DeleteTempDup[Xóa file tạm]
+    DeleteTempDup --> Return409[HTTP 409 Conflict]
+    
+    FastCheck -- Chưa tồn tại --> RetryLoop[Khởi tạo Retry Loop: attempts = 0]
+    
+    RetryLoop --> BeginTx[Stage 5: Begin Transaction]
+    BeginTx --> TryLock{Acquire Lock?}
+    
+    TryLock -- Thất bại/LOCK_BUSY --> RollbackTx[Rollback Transaction]
+    RollbackTx --> IncAttempts[attempts++]
+    IncAttempts --> AttemptsExceeded{attempts >= maxAttempts?}
+    
+    AttemptsExceeded -- Có --> DeleteTempTimeout[Xóa file tạm]
+    DeleteTempTimeout --> Return429[HTTP 429 Too Many Requests]
+    
+    AttemptsExceeded -- Không --> SleepBackoff[Tính Jittered Backoff & Sleep ngoài Transaction]
+    SleepBackoff --> BeginTx
+    
+    TryLock -- Thành công --> DoubleCheck{Stage 6: Double-Check trong Transaction?}
+    
+    DoubleCheck -- Đã tồn tại trong Dept --> RollbackTxDup[Rollback Transaction]
+    RollbackTxDup --> DeleteTempDup2[Xóa file tạm]
+    DeleteTempDup2 --> Return409B[HTTP 409 Conflict]
+    
+    DoubleCheck -- Chưa tồn tại --> InsertMetadata[Stage 7: INSERT Metadata với business_code sequence]
+    
+    InsertMetadata --> SISCheck{Tệp vật lý đã có trên hệ thống?}
+    
+    SISCheck -- Có (oldestFileRef không rỗng) --> PhysicalExist{Tệp vật lý thực tế có tồn tại?}
+    PhysicalExist -- Có --> ReusePath[Tái sử dụng oldest_file_ref]
+    ReusePath --> MarkTempDelete[Đánh dấu file tạm cần dọn dẹp]
+    PhysicalExist -- Không --> AtomicMove[Stage 8: OS Atomic Rename file tạm sang chính thức]
+    
+    SISCheck -- Không --> AtomicMove
+    AtomicMove --> MoveSuccess{Thành công?}
+    
+    MoveSuccess -- Ném FileAlreadyExistsException --> MarkTempDelete
+    MoveSuccess -- Có --> CommitTx[Stage 9: Commit Transaction]
+    
+    MarkTempDelete --> CommitTx
+    CommitTx --> Cleanup[Stage 10: Cleanup block finally - Xóa file tạm nếu được đánh dấu]
+    Cleanup --> Return201[HTTP 201 Created]
 ```
 
 ---
 
-### 4.5. Luồng xử lý khi tải lên tài liệu đã bị xóa mềm (Soft Delete Flow)
-
-Khi một tệp tin đã từng được tải lên bởi phòng ban nghiệp vụ và sau đó bị xóa mềm (soft deleted — bản ghi siêu dữ liệu cũ có `deleted_at IS NOT NULL`), nghiệp vụ yêu cầu tuyệt đối không được khôi phục (restore), phục hồi (revive) hay tái sử dụng bản ghi logic cũ (logical record). Hệ thống sẽ tạo một bản ghi tài liệu hoàn toàn mới và tái sử dụng tệp vật lý sẵn có.
-
-#### Các bước xử lý chi tiết:
-1.  **Fast-Check và Double-Check (Query 2)**:
-    *   Hệ thống thực hiện truy vấn gộp (Query 2) lọc theo mã băm `hash`. Do bản ghi cũ đã bị xóa mềm (`deleted_at IS NOT NULL`), cột `has_active_in_dept` trả về `false`, và `active_doc_id` trả về `null`.
-    *   Truy vấn gộp không lọc theo trạng thái xóa đối với trường tệp vật lý, do đó cột `oldest_file_ref` vẫn trả về đường dẫn tệp vật lý cũ nhất đã lưu trên đĩa (ví dụ: `/eap-storage/{hash}`).
-2.  **Định tuyến luồng**:
-    *   Vì `has_active_in_dept` là `false`, hệ thống nhận định đây là một tài liệu mới đối với phòng ban và đi tiếp vào luồng ghi nhận.
-    *   Tại bước kiểm tra tối ưu hóa lưu trữ (SIS Check), hệ thống phát hiện `oldest_file_ref` không rỗng.
-3.  **Tái sử dụng tệp vật lý & Tạo bản ghi logic mới**:
-    *   Hệ thống không ghi tệp mới lên đĩa, thực hiện đánh dấu hủy tệp tạm ở khối `finally`.
-    *   Hệ thống thực hiện `INSERT` một bản ghi siêu dữ liệu mới (Query 3) với:
-        *   Một khóa chính `id` mới hoàn toàn (sinh ngẫu nhiên UUID).
-        *   Mã nghiệp vụ `business_code` mới sinh từ sequence.
-        *   Trạng thái hoạt động (`deleted_at IS NULL`).
-        *   Đường dẫn `file_reference` trỏ tới `oldest_file_ref` (tệp vật lý cũ).
-4.  **Kết quả phản hồi**:
-    *   Hệ thống commit giao dịch và phản hồi **HTTP 201 Created** chứa siêu dữ liệu của bản ghi logic mới, hoàn tất việc tái sử dụng file vật lý mà không có bất kỳ sự khôi phục nào trên bản ghi cũ.
+### 4.5. Luồng xử lý tài liệu bị xóa mềm (Soft Delete Flow)
+*   **Nguyên tắc**: Tuyệt đối không khôi phục (restore) hoặc sửa đổi các bản ghi siêu dữ liệu cũ đã bị xóa mềm (`deleted_at IS NOT NULL`).
+*   **Workflow**:
+    1.  **Fast-Check & Double-Check (Query 2)**: Trả về `has_active_in_dept = false` (do bản ghi cũ có `deleted_at IS NOT NULL`), đồng thời trả về `oldest_file_ref` chứa đường dẫn file vật lý cũ trên đĩa.
+    2.  **Tái sử dụng file vật lý**: Nhận diện `oldest_file_ref` không rỗng, bỏ qua bước di chuyển file tạm, đánh dấu file tạm cần dọn dẹp ở khối `finally`.
+    3.  **Tạo bản ghi mới**: Thực thi câu lệnh `INSERT` (Query 3) tạo bản ghi metadata hoàn toàn mới với UUID và `business_code` mới sinh từ sequence, trạng thái `deleted_at IS NULL`.
+    4.  **Phản hồi**: Trả về **HTTP 201 Created**.
 
 ---
 
-## 5. Các câu lệnh SQL Tường minh (Raw SQL Queries)
+## 5. Danh sách câu lệnh SQL (Database Raw Queries)
 
-Dưới đây là đặc tả chi tiết của toàn bộ các câu lệnh SQL được sử dụng trong hệ thống:
+### 5.1. Advisory Lock Acquisition
+*   **Purpose**: Yêu cầu khóa cố vấn 64-bit cấp giao dịch trên kết nối JDBC vật lý được ghim để tuần tự hóa các yêu cầu tải lên đồng thời cùng một tệp tin trong cùng một phòng ban.
+*   **SQL**:
+    ```sql
+    SELECT pg_try_advisory_xact_lock(hashtextextended(concat(:ownerDepartmentId::text, ':', :hash), 0));
+    ```
+*   **Parameters**:
+    *   `:ownerDepartmentId`: UUID phòng ban sở hữu tài liệu.
+    *   `:hash`: Chuỗi VARCHAR(64) SHA-256 đại diện cho nội dung tệp.
+*   **Expected Result**: Trả về `true` (boolean) nếu lấy khóa thành công; `false` nếu khóa đã bị chiếm giữ bởi một giao dịch khác.
+*   **Related Business Rule**: BR-2 (Phạm vi kiểm tra trùng lặp áp dụng theo từng phòng ban) và SLA-1 (Xử lý đồng thời 100 requests).
 
-### Query 1: Yêu cầu khóa cố vấn 64-bit không chặn (pg_try_advisory_xact_lock)
+### 5.2. Fast Duplicate Check
+*   **Purpose**: Thực hiện truy vấn nhanh ngoài giao dịch (không xin khóa) để kiểm tra xem phòng ban đã có tài liệu hoạt động trùng mã băm nội dung hay chưa, đồng thời tìm kiếm tệp vật lý cũ nhất để tái sử dụng.
+*   **SQL**:
+    ```sql
+    SELECT 
+        bool_or(owner_department_id = :ownerDepartmentId AND deleted_at IS NULL) AS has_active_in_dept,
+        (array_agg(id ORDER BY created_at ASC) FILTER (WHERE owner_department_id = :ownerDepartmentId AND deleted_at IS NULL))[1] AS active_doc_id,
+        (array_agg(file_reference ORDER BY created_at ASC) FILTER (WHERE file_reference IS NOT NULL))[1] AS oldest_file_ref
+    FROM documents
+    WHERE hash = :hash;
+    ```
+*   **Parameters**:
+    *   `:ownerDepartmentId`: UUID phòng ban thực hiện yêu cầu.
+    *   `:hash`: Chuỗi VARCHAR(64) SHA-256 của tệp.
+*   **Expected Result**: Trả về 1 dòng chứa các thông số:
+    *   `has_active_in_dept`: `true` nếu phòng ban đã có tài liệu hoạt động, `false` nếu ngược lại.
+    *   `active_doc_id`: UUID của tài liệu hoạt động trùng lặp nếu có, `null` nếu không.
+    *   `oldest_file_ref`: Đường dẫn tệp vật lý cũ nhất đã lưu để thực hiện cơ chế lưu trữ đơn bản (SIS), `null` nếu chưa có tệp nào trên hệ thống.
+*   **Related Business Rule**: BR-2, BR-3 (Ràng buộc trạng thái tài liệu hoạt động) và FR-003 (Tối ưu hóa lưu trữ SIS).
 
-Sử dụng `pg_try_advisory_xact_lock` (**transaction-level**) thay vì session-level. Lock được PostgreSQL **tự động giải phóng** khi giao dịch commit hoặc rollback — không cần gọi `pg_advisory_unlock` thủ công. Hàm `hashtextextended` tạo giá trị băm 64-bit từ chuỗi khóa kết hợp giữa mã phòng ban và mã băm tệp, giảm thiểu tỷ lệ va chạm xuống tối đa. Thực thi trên kết nối JDBC vật lý được ghim trong `TransactionTemplate`.
-```sql
-SELECT pg_try_advisory_xact_lock(hashtextextended(concat(:ownerDepartmentId, ':', :hash), 0));
-```
+#### Phân tích Hiệu năng (EXPLAIN ANALYZE) của truy vấn kiểm tra trùng lặp:
 
-### Query 2: Truy vấn gộp Aggregate (Fast-Check và Double-Check)
-Truy vấn này quét trên chỉ mục `idx_documents_hash` theo mã băm tệp để lấy ra trạng thái trùng lặp và đường dẫn file vật lý cũ nhất.
-```sql
-SELECT 
-    bool_or(owner_department_id = :ownerDepartmentId AND deleted_at IS NULL) AS has_active_in_dept,
-    (array_agg(id ORDER BY created_at ASC) FILTER (WHERE owner_department_id = :ownerDepartmentId AND deleted_at IS NULL))[1] AS active_doc_id,
-    (array_agg(file_reference ORDER BY created_at ASC) FILTER (WHERE file_reference IS NOT NULL))[1] AS oldest_file_ref
-FROM documents
-WHERE hash = :hash;
-```
-*   `has_active_in_dept`: Trả về `true` nếu phòng ban đã có bản ghi hoạt động trùng khớp.
-*   `active_doc_id`: UUID của bản ghi hoạt động đó (lấy bản ghi tạo sớm nhất nếu có nhiều hơn một).
-*   `oldest_file_ref`: Đường dẫn tệp vật lý cũ nhất từng tồn tại trên đĩa của mã băm này để phục vụ tái sử dụng (không lọc theo `deleted_at`).
-
-### Kết quả `EXPLAIN ANALYZE INDEX`
+##### 1. Kết quả `EXPLAIN ANALYZE INDEX` (Khi có chỉ mục `idx_documents_hash`)
 
 ```text
 Aggregate  (cost=8.59..8.60 rows=1 width=49)
@@ -485,13 +475,13 @@ Execution Time: 0.339 ms
 ```
 
 **Nhận xét:**
-- PostgreSQL sử dụng **Index Scan** trên chỉ mục `idx_documents_hash`.
-- Điều kiện lọc theo `hash` được thực hiện trực tiếp trên chỉ mục (`Index Cond`).
-- Chỉ có **1 bản ghi** được tìm thấy (`rows=1`).
-- Thời gian lập kế hoạch (**Planning Time**) là **0.407 ms**.
-- Thời gian thực thi (**Execution Time**) là **0.339 ms**, cho thấy truy vấn có hiệu năng rất cao.
+*   PostgreSQL sử dụng **Index Scan** trên chỉ mục `idx_documents_hash`.
+*   Điều kiện lọc theo `hash` được thực hiện trực tiếp trên chỉ mục (`Index Cond`).
+*   Chỉ có **1 bản ghi** được tìm thấy (`rows=1`).
+*   Thời gian lập kế hoạch (**Planning Time**) là **0.407 ms**.
+*   Thời gian thực thi (**Execution Time**) là **0.339 ms**, cho thấy truy vấn có hiệu năng rất cao.
 
-### Kết quả `EXPLAIN ANALYZE SEQ`
+##### 2. Kết quả `EXPLAIN ANALYZE SEQ` (Khi không có chỉ mục hoặc bị Sequential Scan)
 
 ```text
 Aggregate  (cost=73574.50..73574.51 rows=1 width=49)
@@ -517,134 +507,192 @@ Execution Time: 279.650 ms
 ```
 
 **Nhận xét:**
+*   PostgreSQL **không sử dụng chỉ mục** mà thực hiện **Parallel Sequential Scan** trên toàn bộ bảng `documents`.
+*   Truy vấn được thực thi song song với **2 worker**, tổng cộng **3 tiến trình** (1 tiến trình chính + 2 worker).
+*   Mỗi worker quét một phần dữ liệu và áp dụng điều kiện lọc theo `hash`.
+*   Mỗi worker phải loại bỏ khoảng **666.679 bản ghi**, tương đương gần **2 triệu bản ghi** được quét trên toàn bảng.
+*   Mặc dù có sử dụng cơ chế quét song song (`Gather`), thời gian thực thi vẫn lên tới **279.650 ms**, lớn hơn rất nhiều so với trường hợp sử dụng `Index Scan`.
+*   Kết quả này cho thấy khi không có chỉ mục phù hợp trên cột `hash`, PostgreSQL buộc phải quét toàn bộ bảng, làm tăng đáng kể chi phí I/O và thời gian thực thi.
 
-- PostgreSQL **không sử dụng chỉ mục** mà thực hiện **Parallel Sequential Scan** trên toàn bộ bảng `documents`.
-- Truy vấn được thực thi song song với **2 worker**, tổng cộng **3 tiến trình** (1 tiến trình chính + 2 worker).
-- Mỗi worker quét một phần dữ liệu và áp dụng điều kiện lọc theo `hash`.
-- Mỗi worker phải loại bỏ khoảng **666.679 bản ghi**, tương đương gần **2 triệu bản ghi** được quét trên toàn bảng.
-- Mặc dù có sử dụng cơ chế quét song song (`Gather`), thời gian thực thi vẫn lên tới **279.650 ms**, lớn hơn rất nhiều so với trường hợp sử dụng `Index Scan`.
-- Kết quả này cho thấy khi không có chỉ mục phù hợp trên cột `hash`, PostgreSQL buộc phải quét toàn bộ bảng, làm tăng đáng kể chi phí I/O và thời gian thực thi.
+### 5.3. Double Duplicate Check
+*   **Purpose**: Thực hiện kiểm tra lại trùng lặp bên trong giao dịch sau khi đã có khóa cố vấn để ngăn chặn race condition khi hai yêu cầu đồng thời đi qua bước Fast Duplicate Check cùng một lúc.
+*   **SQL**: Sử dụng chung cấu trúc truy vấn với Fast Duplicate Check:
+    ```sql
+    SELECT 
+        bool_or(owner_department_id = :ownerDepartmentId AND deleted_at IS NULL) AS has_active_in_dept,
+        (array_agg(id ORDER BY created_at ASC) FILTER (WHERE owner_department_id = :ownerDepartmentId AND deleted_at IS NULL))[1] AS active_doc_id,
+        (array_agg(file_reference ORDER BY created_at ASC) FILTER (WHERE file_reference IS NOT NULL))[1] AS oldest_file_ref
+    FROM documents
+    WHERE hash = :hash;
+    ```
+*   **Parameters**:
+    *   `:ownerDepartmentId`: UUID phòng ban thực hiện yêu cầu.
+    *   `:hash`: Chuỗi VARCHAR(64) SHA-256 của tệp.
+*   **Expected Result**: Cấu trúc trả về tương tự như Fast Duplicate Check. Nếu `has_active_in_dept` trả về `true`, giao dịch sẽ được rollback ngay lập tức.
+*   **Related Business Rule**: BR-2, BR-3, và SLA-1.
 
-### Query 3: Truy vấn thêm bản ghi tài liệu mới
-```sql
-INSERT INTO documents (
-    id, 
-    business_code, 
-    title, 
-    file_reference, 
-    file_size, 
-    hash, 
-    owner_department_id, 
-    parent_id, 
-    creator_department_id, 
-    created_by, 
-    created_at
-) VALUES (
-    :id, 
-    'ORIG_' || lpad(nextval('doc_business_code_seq')::text, 8, '0'), 
-    :title, 
-    :fileReference, 
-    :fileSize, 
-    :hash, 
-    :ownerDepartmentId, 
-    :parentId, 
-    :creatorDepartmentId, 
-    :createdBy, 
-    NOW()
-);
-```
+### 5.4. Insert Metadata
+*   **Purpose**: Chèn siêu dữ liệu của tài liệu mới vào bảng cơ sở dữ liệu, tự động sinh mã nghiệp vụ thông qua sequence một cách nguyên tử.
+*   **SQL**:
+    ```sql
+    INSERT INTO documents (
+        id, 
+        business_code, 
+        title, 
+        file_reference, 
+        file_size, 
+        hash, 
+        owner_department_id, 
+        parent_id, 
+        creator_department_id, 
+        created_by, 
+        created_at
+    ) VALUES (
+        :id, 
+        'ORIG_' || lpad(nextval('doc_business_code_seq')::text, 8, '0'), 
+        :title, 
+        :fileReference, 
+        :fileSize, 
+        :hash, 
+        :ownerDepartmentId, 
+        :parentId, 
+        :creatorDepartmentId, 
+        :createdBy, 
+        NOW()
+    );
+    ```
+*   **Parameters**:
+    *   `:id`: UUID của tài liệu mới sinh ở ứng dụng.
+    *   `:title`: Tiêu đề của tài liệu (VARCHAR(255)).
+    *   `:fileReference`: Đường dẫn lưu trữ vật lý chính thức của tệp (VARCHAR(512)) hoặc `null` nếu là alias.
+    *   `:fileSize`: Dung lượng tệp (BIGINT).
+    *   `:hash`: Mã băm SHA-256 của tệp (VARCHAR(64)).
+    *   `:ownerDepartmentId`: UUID phòng ban sở hữu.
+    *   `:parentId`: UUID tài liệu gốc (luôn là `null` đối với Original).
+    *   `:creatorDepartmentId`: UUID phòng ban chia sẻ (luôn là `null` đối với Original).
+    *   `:createdBy`: UUID người dùng tải lên.
+*   **Expected Result**: Ghi thành công bản ghi mới vào cơ sở dữ liệu.
+*   **Related Business Rule**: BR-3 (Tạo bản ghi mới độc lập khi bản cũ đã bị xóa mềm) và BR-5.
 
-### Query 4: Truy vấn lấy siêu dữ liệu tài liệu
-Sử dụng để lấy thông tin tài liệu trùng lặp trả về cho client.
-```sql
-SELECT 
-    id, 
-    business_code, 
-    title, 
-    file_reference, 
-    file_size, 
-    hash, 
-    owner_department_id, 
-    parent_id, 
-    creator_department_id, 
-    created_by, 
-    created_at, 
-    updated_at
-FROM documents
-WHERE id = :id;
-```
+### 5.5. Metadata Lookup
+*   **Purpose**: Truy vấn thông tin tài liệu theo khóa chính để trả về siêu dữ liệu chi tiết cho client sau khi tải lên thành công.
+*   **SQL**:
+    ```sql
+    SELECT 
+        id, 
+        business_code, 
+        title, 
+        file_reference, 
+        file_size, 
+        hash, 
+        owner_department_id, 
+        parent_id, 
+        creator_department_id, 
+        created_by, 
+        created_at, 
+        updated_at
+    FROM documents
+    WHERE id = :id;
+    ```
+*   **Parameters**:
+    *   `:id`: UUID khóa chính của tài liệu cần tìm.
+*   **Expected Result**: Trả về 1 dòng chứa thông tin tài liệu.
+*   **Related Business Rule**: Trả về phản hồi đồng nhất theo API specs.
+
+### 5.6. Cleanup Job Database Lookup
+*   **Purpose**: Đối chiếu danh sách các file vật lý quét được trên đĩa lưu trữ chính thức để xác định các file mồ côi (không tồn tại bất kỳ bản ghi metadata hoạt động hoặc đã xóa mềm nào trong DB).
+*   **SQL**:
+    ```sql
+    SELECT hash FROM (SELECT unnest(:fileHashes) AS hash) AS temp_hashes 
+    WHERE NOT EXISTS (
+        SELECT 1 FROM documents d WHERE d.hash = temp_hashes.hash
+    );
+    ```
+*   **Parameters**:
+    *   `:fileHashes`: Mảng VARCHAR[] chứa danh sách các mã băm tệp vật lý thu thập được từ đĩa lưu trữ `/eap-storage`.
+*   **Expected Result**: Trả về danh sách các mã băm không còn tồn tại bất kỳ bản ghi tham chiếu nào trong cơ sở dữ liệu.
+*   **Related Business Rule**: BR-4 (Bảo toàn tệp vật lý, chỉ dọn dẹp các tệp mồ côi hoàn toàn).
+
+### 5.7. Unique Index Definition
+*   **Purpose**: Định nghĩa chỉ mục duy nhất bán phần trên cơ sở dữ liệu để bảo vệ chống trùng lặp dữ liệu hoạt động trong cùng một phòng ban tại tầng vật lý.
+*   **SQL**:
+    ```sql
+    CREATE UNIQUE INDEX uq_documents_hash_dept ON documents(hash, owner_department_id) WHERE deleted_at IS NULL;
+    ```
+*   **Parameters**: Không có.
+*   **Expected Result**: Tạo thành công chỉ mục duy nhất trên bảng `documents`.
+*   **Related Business Rule**: BR-2 và BR-3.
+
+### 5.8. Partial Index Definition
+*   **Purpose**: Định nghĩa chỉ mục toàn phần trên mã băm tệp tin phục vụ việc tìm kiếm nhanh tệp vật lý cũ nhất trên toàn hệ thống lưu trữ phục vụ Single Instance Storage (SIS).
+*   **SQL**:
+    ```sql
+    CREATE INDEX idx_documents_hash ON documents(hash);
+    ```
+*   **Parameters**: Không có.
+*   **Expected Result**: Tạo thành công chỉ mục trên bảng `documents`.
+*   **Related Business Rule**: FR-003 và BR-4.
+
+### 5.9. Transaction Isolation
+*   **Purpose**: Đảm bảo cấu hình mức cô lập giao dịch phù hợp cho các giao dịch tải lên tài liệu.
+*   **SQL**:
+    ```sql
+    SET TRANSACTION ISOLATION LEVEL READ COMMITTED;
+    ```
+*   **Parameters**: Không có.
+*   **Expected Result**: Giao dịch hiện tại hoạt động dưới mức cô lập READ COMMITTED.
+*   **Related Business Rule**: Tránh lỗi Serialization Failure của các mức cô lập cao hơn và tối ưu hóa tài nguyên kết nối cơ sở dữ liệu.
+
+### 5.10. Department Index Definition
+*   **Purpose**: Định nghĩa chỉ mục trên phòng ban sở hữu và trạng thái xóa mềm để tối ưu hóa truy vấn lọc và thống kê danh sách tài liệu hoạt động thuộc sở hữu của một phòng ban cụ thể.
+*   **SQL**:
+    ```sql
+    CREATE INDEX idx_documents_owner_dept_deleted ON documents(owner_department_id, deleted_at);
+    ```
+*   **Parameters**: Không có.
+*   **Expected Result**: Tạo thành công chỉ mục trên bảng `documents`.
+*   **Related Business Rule**: Độc lập và cô lập dữ liệu theo phòng ban (BR-2).
 
 ---
 
-## 6. Quản lý Exception & Timeout (Exception & Timeout Management)
+## 6. Đặc tả Tiến trình Dọn dẹp Định kỳ (Scheduled Cleanup Job)
 
-### 6.1. Lỗi hết thời gian chờ kết nối CSDL (Connection Pool Timeout)
+Tiến trình dọn dẹp chạy ngầm định kỳ (Scheduled Job) được triển khai để tối ưu hóa tài nguyên lưu trữ ngoài giờ cao điểm.
 
-* **Kịch bản**:
-    * Khi HikariCP không cấp được kết nối trong thời gian `connection-timeout = 5000ms`, Driver JDBC sẽ phát sinh `SQLTransientConnectionException` (hoặc ngoại lệ tương đương).
+### 6.1. Cấu hình Kích hoạt
+*   **Cấu hình Trigger**: Sử dụng Cron Expression cấu hình ngoài (không hard-code). Ví dụ: `cleanup.cron=0 2 * * *` (chạy lúc 2 giờ sáng hàng ngày).
+*   **Tham số cấu hình**:
+    *   `cleanup.tempExpirationMs`: Thời gian hết hạn của tệp tạm thời (mặc định: 86400000 ms - tương đương 24 giờ).
+    *   `cleanup.orphanGracePeriodMs`: Khoảng thời gian an toàn trước khi dọn dẹp tệp mồ côi để tránh tranh chấp với giao dịch chưa commit (mặc định: 600000 ms - tương đương 10 phút).
 
-* **Xử lý**:
-    * Global Exception Handler bắt ngoại lệ này và chuyển thành phản hồi:
-        * HTTP 429 Too Many Requests
-        * Error Code: `ERR_CONCURRENT_UPLOAD`
-    * Hệ thống ghi log ở mức **WARN** để phục vụ giám sát vận hành.
+### 6.2. Quy trình thực thi (Workflow)
+1.  **Pha 1: Dọn dẹp tệp tạm thời hết hạn (Expired Temp Files)**:
+    *   Tiến trình quét thư mục tạm thời `/eap-storage/tmp`.
+    *   Đối chiếu thời gian sửa đổi cuối cùng (`lastModifiedTime`) của từng tệp tạm với thời điểm hiện tại.
+    *   Xóa mọi tệp tạm có thời gian tồn tại vượt quá `cleanup.tempExpirationMs`.
+2.  **Pha 2: Dọn dẹp tệp vật lý mồ côi (Orphan Physical Files)**:
+    *   Tiến trình quét tất cả tệp vật lý nằm trong thư mục chính thức `/eap-storage` (loại trừ thư mục `/eap-storage/tmp`).
+    *   Đối với từng tệp vật lý, đối chiếu thời gian sửa đổi cuối cùng (`lastModifiedTime`) với thời điểm hiện tại. Chỉ chọn các tệp đã tồn tại trên đĩa lâu hơn khoảng thời gian `cleanup.orphanGracePeriodMs` để đưa vào danh sách kiểm tra. Các tệp mới hơn sẽ bị bỏ qua trong chu kỳ này để tránh tranh chấp với các giao dịch tải lên đang hoạt động nhưng chưa commit.
+    *   Thu thập danh sách tên tệp vật lý thỏa mãn điều kiện thời gian (cũng chính là các mã băm) thành một mảng và truyền vào **Cleanup Job Database Lookup (Query 5.6)**.
+    *   Nhận danh sách mã băm mồ côi được cơ sở dữ liệu trả về (không còn bất kỳ bản ghi nào tham chiếu, kể cả bản ghi đã xóa mềm).
+    *   Thực hiện xóa các tệp vật lý tương ứng trên đĩa lưu trữ.
 
-* **Lưu ý triển khai**:
-    * Kích thước HikariCP (`maximum-pool-size`) và Thread Pool cho tác vụ CPU-bound được cấu hình theo Architecture Design.
-    * Luồng retry advisory lock luôn thực hiện ngoài transaction, vì vậy trong thời gian chờ retry hệ thống không giữ JDBC Connection.
-
-### 6.2. Lỗi vi phạm UNIQUE Constraint (Failsafe)
-
-* **Kịch bản**: Trong trường hợp bất thường, thao tác `INSERT` vi phạm ràng buộc `uq_documents_hash_dept`.
-
-* **Xử lý**:
-    * Rollback transaction (PostgreSQL tự động giải phóng transaction-level advisory lock).
-    * Dọn dẹp tệp tạm nếu vẫn còn tồn tại.
-    * Truy vấn lại bản ghi tài liệu đang hoạt động.
-    * Trả về **HTTP 201 Created** với metadata của bản ghi đã tồn tại nhằm đảm bảo tính idempotent của API.
-
-### 6.3. Lỗi Hết thời gian chờ Advisory Lock
-
-* **Kịch bản**: Sau số lần retry tối đa, request vẫn không lấy được `pg_try_advisory_xact_lock`.
-
-* **Xử lý**:
-    * Kết thúc transaction hiện tại (nếu có).
-    * Dọn dẹp tệp tạm.
-    * Ném `ConcurrentUploadTimeoutException`.
-    * Global Exception Handler chuyển đổi thành phản hồi **HTTP 429 Too Many Requests** (`ERR_CONCURRENT_UPLOAD`).
-
-### 6.4. Mất kết nối hoặc Dừng Ứng dụng
-
-* **Kịch bản**:
-    * Kết nối tới PostgreSQL bị gián đoạn; hoặc
-    * Ứng dụng dừng trong khi transaction đang thực thi.
-
-* **Xử lý**:
-    * PostgreSQL tự động rollback transaction.
-    * Advisory lock transaction-level được tự động giải phóng.
-    * Ứng dụng dọn dẹp tệp tạm trong khối `finally`.
-    * Các request khác có thể tiếp tục xử lý bình thường.
+### 6.3. Nguyên nhân tồn tại các tệp mồ côi
+*   **Lỗi giao dịch DB**: Tệp tạm đã được di chuyển thành công sang tệp chính thức nhưng giao dịch ghi nhận siêu dữ liệu sau đó gặp lỗi và bị rollback, dẫn đến tệp vật lý tồn tại trên đĩa nhưng không có siêu dữ liệu tương ứng trong cơ sở dữ liệu.
+*   **Lỗi ứng dụng đột ngột**: Ứng dụng bị dừng đột ngột (crash/kill -9) trong khi đang xử lý tệp tạm, khiến khối `finally` không thể thực thi để dọn dẹp tệp tạm.
 
 ---
 
-## 7. Phân tích & Đánh giá Giải pháp Khóa (Locking Mechanism Technical Evaluation)
+## 7. Quản lý Ngoại lệ & Ánh xạ Lỗi (Exception & Error Mapping)
 
-Đối với bài toán kiểm soát tải đồng thời và chống trùng lặp dữ liệu, hệ thống tiến hành phân tích so sánh 3 phương án kỹ thuật:
+### 7.1. Áp dụng Ranh giới Ngoại lệ
 
-### 7.1. So sánh các Phương án Khóa
-
-| Tiêu chí | Option 1: Native SQL via `JdbcTemplate` trong `TransactionTemplate` (Đề xuất) | Option 2: Spring Data JPA `@Query(nativeQuery = true)` | Option 3: JPA `@Lock(PESSIMISTIC_WRITE)` |
+| Ngoại lệ phát sinh | Nguyên nhân | Phản hồi API trả về | Cách xử lý |
 | :--- | :--- | :--- | :--- |
-| **Cơ chế hoạt động** | Gọi `pg_try_advisory_xact_lock` trực tiếp trên kết nối JDBC được ghim bởi `TransactionTemplate`. | Gọi native query qua Proxy đại lý của Spring Data JPA. | Gọi `SELECT ... FOR UPDATE` trên thực thể JPA. |
-| **Khóa dòng chưa tồn tại** | **TỐT**: Khóa trên giá trị băm logic (64-bit BigInt), không phụ thuộc bản ghi DB. | **TỐT**: Khóa trên giá trị băm logic. | **KHÔNG THỂ**: `FOR UPDATE` đòi hỏi bản ghi phải tồn tại trước dưới DB. Không tác dụng với file mới. |
-| **Đảm bảo Pinned Connection** | **TUYỆT ĐỐI 100%**: `TransactionTemplate` giữ chặt đúng 1 kết nối JDBC cho toàn chuỗi thao tác. | **RỦI RO**: Rò rỉ kết nối nếu không quản lý chặt chẽ transaction boundary của Proxy. | **TRUNG BÌNH**: Phụ thuộc vào transaction quản lý bởi Hibernate. |
-| **Hiệu năng & Overhead** | **TỐI ƯU**: Trực thi SQL phẳng, 0ms proxy overhead. | **TRUNG BÌNH**: Phải đi qua proxy layer của Spring Data. | **THẤP**: Phải load entity state vào Hibernate Persistence Context. |
-| **Khả năng giải phóng sớm** | **TỐT**: Trả về boolean ngay (`pg_try_advisory_xact_lock`), fail-fast HTTP 429 nếu hết retry. | **TRUNG BÌNH**: Khó kiểm soát retry loop ở tầng DAO. | **KÉM**: Giữ lock cho đến tận khi kết thúc transaction commit. |
-
-### 7.2. Kết luận Giải pháp Đề xuất
-
-1. **Từ bỏ Option 3 (JPA `@Lock(PESSIMISTIC_WRITE)`):** Do `PESSIMISTIC_WRITE` dựa trên `FOR UPDATE` cấp dòng (row-level lock), nó hoàn toàn không thể khóa được các yêu cầu tải lên tệp tin mới (chưa có bản ghi nào trong database).
-2. Lựa chọn Option 1 (`JdbcTemplate` + `TransactionTemplate` Pinned Connection):
-   * Đây là phương án tối ưu nhất về mặt kiến trúc.
-   * `JdbcTemplate` kết hợp `TransactionTemplate` đảm bảo chuỗi thao tác `pg_try_advisory_xact_lock` -> `Double-Check` -> `Atomic Rename` -> `INSERT` -> Transaction Commit (PostgreSQL tự động giải phóng lock) được chạy nguyên tử trên đúng **1 kết nối JDBC vật lý duy nhất (Pinned Connection)**.
-   * Đảm bảo tính Idempotency, không gây connection pool starvation, và bảo vệ an toàn cho SLA phản hồi của hệ thống.
+| `SQLTransientConnectionException` | Không lấy được kết nối từ HikariCP pool sau 5000ms. | HTTP 429 Too Many Requests (`ERR_CONCURRENT_UPLOAD`) | Ghi log WARN. |
+| `ConcurrentUploadTimeoutException` | Vượt quá số lần retry (`maxAttempts`) xin khóa cố vấn. | HTTP 429 Too Many Requests (`ERR_CONCURRENT_UPLOAD`) | Hủy tệp tạm, ghi log WARN. |
+| `DuplicateDocumentException` | Phát hiện tài liệu hoạt động đã tồn tại trong phòng ban (ở Fast-check hoặc Double-check). | HTTP 409 Conflict (`ERR_DUPLICATE_DOCUMENT`) | Hủy tệp tạm, kết thúc xử lý. |
+| `DataIntegrityViolationException` | Lỗi vi phạm ràng buộc chèn trùng lặp ở tầng DB (lớp bảo vệ failsafe cuối cùng). | HTTP 409 Conflict (`ERR_DUPLICATE_DOCUMENT`) | Rollback giao dịch, hủy tệp tạm. |
+| `FileAlreadyExistsException` | Hai phòng ban khác nhau đổi tên tệp tạm trùng hash cùng một lúc. | Không trả lỗi (Thành công - HTTP 201) | Bắt ngoại lệ ở tầng Service, đánh dấu hủy tệp tạm hiện tại và tái sử dụng tệp đích có sẵn. |
+| `MethodArgumentNotValidException` / `InvalidMagicBytesException` | Dữ liệu đầu vào hoặc định dạng tệp tin (magic bytes) không hợp lệ. | HTTP 400 Bad Request (`ERR_INVALID_REQUEST`) | Hủy tệp tạm, trả lỗi cho client. |
+| `IOException` | Lỗi đọc/ghi đĩa cứng, đầy đĩa, mất quyền ghi. | HTTP 500 Internal Server Error (`ERR_INTERNAL_SERVER_ERROR`) | Rollback giao dịch, ghi log ERROR chi tiết. |

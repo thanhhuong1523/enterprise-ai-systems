@@ -36,4 +36,9 @@ public interface DocumentRepository extends JpaRepository<Document, UUID> {
     Page<Document> findByParentIdIsNullAndOwnerDepartmentId(UUID ownerDepartmentId, Pageable pageable);
 
     Page<Document> findByParentIdIsNotNullAndOwnerDepartmentId(UUID ownerDepartmentId, Pageable pageable);
+
+    @org.springframework.data.jpa.repository.Query(value = "SELECT hash FROM (SELECT unnest(:fileHashes) AS hash) AS temp_hashes " +
+                   "WHERE NOT EXISTS (SELECT 1 FROM documents d WHERE d.hash = temp_hashes.hash)", 
+           nativeQuery = true)
+    List<String> findOrphanHashes(@Param("fileHashes") String[] fileHashes);
 }
