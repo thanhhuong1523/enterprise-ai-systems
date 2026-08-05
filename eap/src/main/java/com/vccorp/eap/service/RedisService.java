@@ -1,36 +1,34 @@
 package com.vccorp.eap.service;
 
-import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.stereotype.Service;
-
-import java.util.concurrent.TimeUnit;
-
-@Service
-public class RedisService {
-
-    private final StringRedisTemplate redisTemplate;
-
-    public RedisService(StringRedisTemplate redisTemplate) {
-        this.redisTemplate = redisTemplate;
-    }
-
-    public void set(String key, String value) {
-        redisTemplate.opsForValue().set(key, value);
-    }
-
-    public void set(String key, String value, long timeoutMs) {
-        redisTemplate.opsForValue().set(key, value, timeoutMs, TimeUnit.MILLISECONDS);
-    }
-
-    public String get(String key) {
-        return redisTemplate.opsForValue().get(key);
-    }
-
-    public Boolean delete(String key) {
-        return redisTemplate.delete(key);
-    }
-
-    public Boolean hasKey(String key) {
-        return redisTemplate.hasKey(key);
-    }
+/**
+ * Interface cung cấp các thao tác cơ bản với Redis Cache.
+ * Định nghĩa các phương thức lưu trữ, lấy dữ liệu và thu hồi khóa.
+ */
+public interface RedisService {
+    
+    /**
+     * Lưu giá trị kiểu chuỗi với key tương ứng (không giới hạn thời gian).
+     */
+    void set(String key, String value);
+    
+    /**
+     * Lưu giá trị kiểu chuỗi kèm thời gian sống (TTL) tính bằng mili-giây.
+     */
+    void set(String key, String value, long timeoutMs);
+    
+    /**
+     * Lấy giá trị chuỗi lưu trữ từ Redis dựa vào key.
+     */
+    String get(String key);
+    
+    /**
+     * Xóa key và dữ liệu liên quan khỏi Redis.
+     * @return true nếu xóa thành công, false nếu không tồn tại hoặc lỗi.
+     */
+    Boolean delete(String key);
+    
+    /**
+     * Kiểm tra sự tồn tại của key trong Redis cache.
+     */
+    Boolean hasKey(String key);
 }

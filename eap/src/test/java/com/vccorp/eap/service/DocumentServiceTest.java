@@ -25,6 +25,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockMultipartFile;
@@ -59,10 +60,7 @@ public class DocumentServiceTest {
     private FileStorageService fileStorageService;
 
     @Mock
-    private DocumentAdvisoryLockHandler advisoryLockHandler;
-
-    @Mock
-    private DocumentDeduplicationHelper deduplicationHelper;
+    private com.vccorp.eap.service.helper.DocumentDeduplicationManager deduplicationManager;
 
     @Mock
     private DocumentUploadCoordinator uploadCoordinator;
@@ -79,7 +77,8 @@ public class DocumentServiceTest {
     @Mock
     private DataSource dataSource;
 
-    @InjectMocks
+    private com.vccorp.eap.service.validation.UploadValidator uploadValidator;
+    private com.vccorp.eap.service.mapper.DocumentMapper documentMapper;
     private DocumentServiceImpl documentService;
 
     @TempDir
@@ -92,6 +91,20 @@ public class DocumentServiceTest {
 
     @BeforeEach
     void setUp() {
+        uploadValidator = new com.vccorp.eap.service.validation.impl.UploadValidatorImpl(departmentRepository);
+        documentMapper = new com.vccorp.eap.service.mapper.DocumentMapper();
+        documentService = new DocumentServiceImpl(
+                documentRepository,
+                departmentRepository,
+                fileStorageService,
+                deduplicationManager,
+                uploadCoordinator,
+                businessCodeAllocator,
+                transactionManager,
+                uploadValidator,
+                documentMapper
+        );
+
         deptId = UUID.randomUUID();
         boardDeptId = UUID.randomUUID();
         employeeUser = User.builder()
@@ -137,9 +150,8 @@ public class DocumentServiceTest {
         when(uploadCoordinator.coordinate(any()))
                 .thenReturn(storageResult);
 
-        // Fast check: KHÔNG trùng
-        when(deduplicationHelper.executeAggregateCheck(
-                any(JdbcTemplate.class),
+        // Fast check & double check
+        when(deduplicationManager.doubleCheckDuplicate(
                 eq("dummyhash123"),
                 eq(deptId)))
                 .thenReturn(new DeduplicationQueryResult(
@@ -149,7 +161,7 @@ public class DocumentServiceTest {
                 ));
 
         // Advisory lock thành công
-        when(advisoryLockHandler.tryAcquireLock(
+        when(deduplicationManager.tryAcquireLock(
                 deptId,
                 "dummyhash123"))
                 .thenReturn(true);
@@ -186,7 +198,7 @@ public class DocumentServiceTest {
         assertFalse(response.isAlias());
 
         verify(uploadCoordinator).coordinate(any());
-        verify(advisoryLockHandler)
+        verify(deduplicationManager)
                 .tryAcquireLock(deptId, "dummyhash123");
         verify(fileStorageService)
                 .moveTempToPermanent(tempPath, "dummyhash123");
@@ -221,15 +233,8 @@ public class DocumentServiceTest {
         when(uploadCoordinator.coordinate(file))
                 .thenReturn(storageResult);
 
-        when(deduplicationHelper.executeAggregateCheck(
-                same(jdbcTemplate),
-                eq("dummyhash123"),
-                eq(deptId)))
-                .thenReturn(new DeduplicationQueryResult(
-                        true,
-                        UUID.randomUUID(),
-                        "/storage/dummyhash123"
-                ));
+        doThrow(new BusinessException(ErrorCode.ERR_DUPLICATE_DOCUMENT))
+                .when(deduplicationManager).fastCheckDuplicate(eq("dummyhash123"), eq(deptId));
 
         // Act
         BusinessException ex = assertThrows(
@@ -246,14 +251,14 @@ public class DocumentServiceTest {
 
         verify(uploadCoordinator).coordinate(file);
 
-        verify(deduplicationHelper).executeAggregateCheck(
-                same(jdbcTemplate),
+        verify(deduplicationManager).fastCheckDuplicate(
                 eq("dummyhash123"),
                 eq(deptId)
         );
 
         // Fast check fail nên không vào transaction
-        verifyNoInteractions(advisoryLockHandler);
+        verify(deduplicationManager, never()).tryAcquireLock(any(), any());
+        verify(deduplicationManager, never()).doubleCheckDuplicate(any(), any());
 
         verify(documentRepository, never()).save(any());
         verify(documentRepository, never()).saveAndFlush(any());
@@ -402,9 +407,9 @@ public class DocumentServiceTest {
 
         when(transactionManager.getTransaction(any())).thenReturn(mock(TransactionStatus.class));
         when(uploadCoordinator.coordinate(any())).thenReturn(storageResult);
-        when(deduplicationHelper.executeAggregateCheck(any(JdbcTemplate.class), eq("hash_reuse"), eq(deptId)))
+        when(deduplicationManager.doubleCheckDuplicate(eq("hash_reuse"), eq(deptId)))
                 .thenReturn(new DeduplicationQueryResult(false, null, "/storage/old_file"));
-        when(advisoryLockHandler.tryAcquireLock(deptId, "hash_reuse")).thenReturn(true);
+        when(deduplicationManager.tryAcquireLock(deptId, "hash_reuse")).thenReturn(true);
         when(fileStorageService.exists("/storage/old_file")).thenReturn(true);
         when(businessCodeAllocator.allocate()).thenReturn("ORIG_00000002");
         when(documentRepository.saveAndFlush(any(Document.class))).thenAnswer(invocation -> invocation.getArgument(0));
@@ -426,9 +431,9 @@ public class DocumentServiceTest {
 
         when(transactionManager.getTransaction(any())).thenReturn(mock(TransactionStatus.class));
         when(uploadCoordinator.coordinate(any())).thenReturn(storageResult);
-        when(deduplicationHelper.executeAggregateCheck(any(JdbcTemplate.class), eq("hash_missing"), eq(deptId)))
+        when(deduplicationManager.doubleCheckDuplicate(eq("hash_missing"), eq(deptId)))
                 .thenReturn(new DeduplicationQueryResult(false, null, "/storage/old_file"));
-        when(advisoryLockHandler.tryAcquireLock(deptId, "hash_missing")).thenReturn(true);
+        when(deduplicationManager.tryAcquireLock(deptId, "hash_missing")).thenReturn(true);
         when(fileStorageService.exists("/storage/old_file")).thenReturn(false);
         when(fileStorageService.moveTempToPermanent(tempPath, "hash_missing")).thenReturn("/storage/new_file");
         when(businessCodeAllocator.allocate()).thenReturn("ORIG_00000003");
@@ -450,16 +455,17 @@ public class DocumentServiceTest {
 
         when(transactionManager.getTransaction(any())).thenReturn(mock(TransactionStatus.class));
         when(uploadCoordinator.coordinate(any())).thenReturn(storageResult);
-        when(deduplicationHelper.executeAggregateCheck(any(JdbcTemplate.class), eq("hash_busy"), eq(deptId)))
+        when(deduplicationManager.tryAcquireLock(deptId, "hash_busy")).thenReturn(false);
+        when(deduplicationManager.doubleCheckDuplicate(eq("hash_busy"), eq(deptId)))
                 .thenReturn(new DeduplicationQueryResult(false, null, null));
-        when(advisoryLockHandler.tryAcquireLock(deptId, "hash_busy")).thenReturn(false);
+        when(fileStorageService.moveTempToPermanent(tempPath, "hash_busy")).thenReturn("/storage/hash_busy");
 
         assertThrows(ConcurrentUploadTimeoutException.class, () ->
                 documentService.uploadOriginalDocument("Test Busy", file, employeeUser)
         );
 
-        verify(advisoryLockHandler, times(5)).tryAcquireLock(deptId, "hash_busy");
-        verify(fileStorageService).deleteTempFileQuietly(tempPath);
+        verify(deduplicationManager, times(5)).tryAcquireLock(deptId, "hash_busy");
+        verify(fileStorageService).moveTempToPermanent(tempPath, "hash_busy");
     }
 
     @Test
@@ -472,9 +478,9 @@ public class DocumentServiceTest {
 
         when(transactionManager.getTransaction(any())).thenReturn(mock(TransactionStatus.class));
         when(uploadCoordinator.coordinate(any())).thenReturn(storageResult);
-        when(deduplicationHelper.executeAggregateCheck(any(JdbcTemplate.class), eq("hash_violation"), eq(deptId)))
+        when(deduplicationManager.doubleCheckDuplicate(eq("hash_violation"), eq(deptId)))
                 .thenReturn(new DeduplicationQueryResult(false, null, null));
-        when(advisoryLockHandler.tryAcquireLock(deptId, "hash_violation")).thenReturn(true);
+        when(deduplicationManager.tryAcquireLock(deptId, "hash_violation")).thenReturn(true);
         when(fileStorageService.moveTempToPermanent(tempPath, "hash_violation")).thenReturn("/storage/new_file");
         when(businessCodeAllocator.allocate()).thenReturn("ORIG_00000004");
         

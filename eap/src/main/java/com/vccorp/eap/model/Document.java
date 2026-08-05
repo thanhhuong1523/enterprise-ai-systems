@@ -10,7 +10,7 @@ import java.time.LocalDateTime;
 import java.util.UUID;
 
 @Entity
-@Table(name = "documents")
+@Table(name = "tbl_documents")
 @SQLRestriction("deleted_at IS NULL")
 @FilterDef(
     name = "deptIsolationFilter",
@@ -18,7 +18,7 @@ import java.util.UUID;
 )
 @Filter(
     name = "deptIsolationFilter",
-    condition = "(owner_department_id = :userDeptId OR creator_department_id = :userDeptId OR (parent_id IS NULL AND id IN (SELECT parent_id FROM documents WHERE owner_department_id = :userDeptId AND parent_id IS NOT NULL AND deleted_at IS NULL))) AND deleted_at IS NULL"
+    condition = "(owner_department_id = :userDeptId OR creator_department_id = :userDeptId OR (parent_id IS NULL AND id IN (SELECT parent_id FROM tbl_documents WHERE owner_department_id = :userDeptId AND parent_id IS NOT NULL AND deleted_at IS NULL))) AND deleted_at IS NULL"
 )
 public class Document {
     @Id
@@ -59,11 +59,27 @@ public class Document {
     @Column(name = "deleted_at")
     private LocalDateTime deletedAt;
 
+    @Column(name = "status")
+    private String status;
+
+    @Column(name = "worker_id")
+    private String workerId;
+
+    @Column(name = "retry_count")
+    private Integer retryCount;
+
+    @Column(name = "last_completed_chunk")
+    private Integer lastCompletedChunk;
+
+    @Column(name = "total_chunks")
+    private Integer totalChunks;
+
     public Document() {}
 
     public Document(UUID id, String businessCode, String title, String fileReference, Long fileSize, String hash,
                     UUID ownerDepartmentId, UUID parentId, UUID creatorDepartmentId, UUID createdBy,
-                    LocalDateTime createdAt, LocalDateTime updatedAt, LocalDateTime deletedAt) {
+                    LocalDateTime createdAt, LocalDateTime updatedAt, LocalDateTime deletedAt,
+                    String status, String workerId, Integer retryCount, Integer lastCompletedChunk, Integer totalChunks) {
         this.id = id;
         this.businessCode = businessCode;
         this.title = title;
@@ -77,6 +93,11 @@ public class Document {
         this.createdAt = createdAt;
         this.updatedAt = updatedAt;
         this.deletedAt = deletedAt;
+        this.status = status;
+        this.workerId = workerId;
+        this.retryCount = retryCount;
+        this.lastCompletedChunk = lastCompletedChunk;
+        this.totalChunks = totalChunks;
     }
 
     public boolean isAlias() {
@@ -114,6 +135,31 @@ public class Document {
     public void setUpdatedAt(LocalDateTime updatedAt) { this.updatedAt = updatedAt; }
     public LocalDateTime getDeletedAt() { return deletedAt; }
     public void setDeletedAt(LocalDateTime deletedAt) { this.deletedAt = deletedAt; }
+    
+    public String getStatus() { return status; }
+    public void setStatus(String status) { this.status = status; }
+    public String getWorkerId() { return workerId; }
+    public void setWorkerId(String workerId) { this.workerId = workerId; }
+    public Integer getRetryCount() { return retryCount; }
+    public void setRetryCount(Integer retryCount) { this.retryCount = retryCount; }
+    public Integer getLastCompletedChunk() { return lastCompletedChunk; }
+    public void setLastCompletedChunk(Integer lastCompletedChunk) { this.lastCompletedChunk = lastCompletedChunk; }
+    public Integer getTotalChunks() { return totalChunks; }
+    public void setTotalChunks(Integer totalChunks) { this.totalChunks = totalChunks; }
+
+    @Override
+    public String toString() {
+        return "Document{" +
+                "id=" + id +
+                ", businessCode='" + businessCode + '\'' +
+                ", title='" + title + '\'' +
+                ", status='" + status + '\'' +
+                ", workerId='" + workerId + '\'' +
+                ", retryCount=" + retryCount +
+                ", lastCompletedChunk=" + lastCompletedChunk +
+                ", totalChunks=" + totalChunks +
+                '}';
+    }
 
     public static DocumentBuilder builder() {
         return new DocumentBuilder();
@@ -133,6 +179,11 @@ public class Document {
         private LocalDateTime createdAt;
         private LocalDateTime updatedAt;
         private LocalDateTime deletedAt;
+        private String status;
+        private String workerId;
+        private Integer retryCount;
+        private Integer lastCompletedChunk;
+        private Integer totalChunks;
 
         public DocumentBuilder id(UUID id) {
             this.id = id;
@@ -199,10 +250,36 @@ public class Document {
             return this;
         }
 
+        public DocumentBuilder status(String status) {
+            this.status = status;
+            return this;
+        }
+
+        public DocumentBuilder workerId(String workerId) {
+            this.workerId = workerId;
+            return this;
+        }
+
+        public DocumentBuilder retryCount(Integer retryCount) {
+            this.retryCount = retryCount;
+            return this;
+        }
+
+        public DocumentBuilder lastCompletedChunk(Integer lastCompletedChunk) {
+            this.lastCompletedChunk = lastCompletedChunk;
+            return this;
+        }
+
+        public DocumentBuilder totalChunks(Integer totalChunks) {
+            this.totalChunks = totalChunks;
+            return this;
+        }
+
         public Document build() {
             return new Document(id, businessCode, title, fileReference, fileSize, hash,
                     ownerDepartmentId, parentId, creatorDepartmentId, createdBy,
-                    createdAt, updatedAt, deletedAt);
+                    createdAt, updatedAt, deletedAt, status, workerId, retryCount,
+                    lastCompletedChunk, totalChunks);
         }
     }
 }

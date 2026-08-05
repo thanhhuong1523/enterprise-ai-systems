@@ -15,7 +15,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
-public interface DocumentRepository extends JpaRepository<Document, UUID> {
+public interface DocumentRepository extends JpaRepository<Document, UUID>, DocumentRepositoryCustom {
     
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT d FROM Document d WHERE d.id = :id AND d.deletedAt IS NULL")
@@ -38,7 +38,7 @@ public interface DocumentRepository extends JpaRepository<Document, UUID> {
     Page<Document> findByParentIdIsNotNullAndOwnerDepartmentId(UUID ownerDepartmentId, Pageable pageable);
 
     @org.springframework.data.jpa.repository.Query(value = "SELECT hash FROM (SELECT unnest(:fileHashes) AS hash) AS temp_hashes " +
-                   "WHERE NOT EXISTS (SELECT 1 FROM documents d WHERE d.hash = temp_hashes.hash)", 
+                   "WHERE NOT EXISTS (SELECT 1 FROM tbl_documents d WHERE d.hash = temp_hashes.hash)", 
            nativeQuery = true)
     List<String> findOrphanHashes(@Param("fileHashes") String[] fileHashes);
 }

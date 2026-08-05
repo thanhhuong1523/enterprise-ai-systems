@@ -7,7 +7,7 @@ import java.time.LocalDateTime;
 import java.util.UUID;
 
 @Entity
-@Table(name = "users")
+@Table(name = "tbl_users")
 @SQLRestriction("deleted_at IS NULL")
 public class User {
     @Id
