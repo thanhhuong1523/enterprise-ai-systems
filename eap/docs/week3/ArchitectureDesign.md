@@ -111,9 +111,9 @@ Dưới đây là sơ đồ bối cảnh hệ thống mô tả tương tác gi�
 flowchart TD
   Client[Client / Browser] -->|Tải tài liệu & Truy vấn tiến độ| API[REST API Layer]
   API -->|Ghi nhận tệp vật lý| Storage[Local Storage]
-  API -->|Đăng ký Metadata & Trạng thái| DB[(PostgreSQL Database)]
+  API -->|Đăng ký Metadata & Trạng thái| DB[("PostgreSQL Database")]
   
-  subgraph Application Server VM
+  subgraph app_server_vm ["Application Server VM"]
     API
     Storage
   end
@@ -224,13 +224,14 @@ flowchart TD
   Start([Chu kỳ bắt đầu]) --> Schedule[Worker Scheduler kích hoạt]
   Schedule --> Poll[Thực hiện Polling Cycle: Quét cơ sở dữ liệu tìm task READY]
   Poll --> Check{Có task READY?}
-  Check -- Không --> Wait[Đợi chu kỳ lập lịch tiếp theo] --> Start
-  Check -- Có --> Claim[Thực hiện Worker Claim: Chuyển trạng thái sang PROCESSING nguyên tử]
+  Check -->|Không| Wait[Đợi chu kỳ lập lịch tiếp theo]
+  Wait --> Start
+  Check -->|Có| Claim[Thực hiện Worker Claim: Chuyển trạng thái sang PROCESSING nguyên tử]
   Claim --> Execute[Worker Pool xử lý lũy tiến các Đơn vị]
   Execute --> Checkpoint[Ghi nhận checkpoint tiến độ sau mỗi Đơn vị]
   Checkpoint --> FinalCheck{Hết đơn vị?}
-  FinalCheck -- Không --> Execute
-  FinalCheck -- Có --> Complete[Chuyển trạng thái tác vụ sang COMPLETED]
+  FinalCheck -->|Không| Execute
+  FinalCheck -->|Có| Complete[Chuyển trạng thái tác vụ sang COMPLETED]
   Complete --> Wait
 ```
 
@@ -268,20 +269,20 @@ sequenceDiagram
   participant WP as Background Worker Pool
   participant AI as AI Integration
 
-  Note over WP, AI: [1] Worker Pool đang xử lý lũy tiến tác vụ
+  Note over WP,AI: [1] Worker Pool đang xử lý lũy tiến tác vụ
   WP->>AI: Gửi Đơn vị xử lý hiện tại
   AI-->>WP: Kết quả xử lý đơn vị thành công
   WP->>DB: Ghi nhận Processing Checkpoint mới (Trạng thái tác vụ = PROCESSING)
   
-  Note over DB, Storage: [2] MÁY CHỦ SẬP ĐỘT NGỘT (Checkpoint cuối đã được lưu bền vững)
+  Note over DB,Storage: [2] MÁY CHỦ SẬP ĐỘT NGỘT (Checkpoint cuối đã được lưu bền vững)
   
-  Note over SR, DB: [3] KHỞI ĐỘNG LẠI MÁY CHỦ - Kích hoạt Startup Recovery
+  Note over SR,DB: [3] KHỞI ĐỘNG LẠI MÁY CHỦ - Kích hoạt Startup Recovery
   SR->>DB: Quét tìm tất cả các tác vụ ở trạng thái PROCESSING
   DB-->>SR: Danh sách tác vụ bị kẹt
   SR->>DB: Reset trạng thái tác vụ về READY (Bảo toàn nguyên vẹn checkpoint cũ)
   DB-->>SR: Xác nhận hoàn tất khôi phục trạng thái
   
-  Note over WP, DB: [4] PHA CHẠY THƯỜNG - Worker Pool bắt đầu hoạt động
+  Note over WP,DB: [4] PHA CHẠY THƯỜNG - Worker Pool bắt đầu hoạt động
   WP->>DB: Quét tìm tác vụ READY & thực hiện Claim Task nguyên tử
   DB-->>WP: Xác nhận giao quyền xử lý tác vụ
   WP->>DB: Truy vấn checkpoint gần nhất của tác vụ
@@ -318,27 +319,27 @@ Góc nhìn Triển khai mô tả cấu trúc vật lý của hệ thống, chỉ
 
 ```mermaid
 flowchart TD
-  subgraph Public Network
+  subgraph public_network ["Public Network"]
     Client[Client Browser]
   end
 
-  subgraph Application Server VM (01 Node duy nhất)
+  subgraph app_server_vm ["Application Server VM (01 Node duy nhất)"]
     direction TB
     API[REST API Layer]
     WorkerPool[Background Worker Pool]
     StartupRecovery[Startup Recovery Module]
     
-    subgraph Filesystem [Local Filesystem]
+    subgraph local_filesystem ["Local Filesystem"]
       TempDir[Temporary Storage]
       StorageRoot[Permanent Storage]
     end
   end
 
-  subgraph Database Server VM
-    DB[(PostgreSQL Database)]
+  subgraph db_server_vm ["Database Server VM"]
+    DB[("PostgreSQL Database")]
   end
 
-  subgraph External Network
+  subgraph external_network ["External Network"]
     AI[External AI Service]
   end
 

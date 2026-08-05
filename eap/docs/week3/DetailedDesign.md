@@ -102,66 +102,66 @@ Biểu đồ lớp UML dưới đây thể hiện cấu trúc thuộc tính, ph�
 ```mermaid
 classDiagram
   class UploadController {
-    +uploadDocument(title: String, file: MultipartFile) ResponseEntity
+    +uploadDocument(title: String, file: MultipartFile) : ResponseEntity
   }
   class DocumentService {
     <<interface>>
-    +uploadOriginalDocument(title: String, file: MultipartFile, currentUser: User) DocumentResponse
-    +getOriginalDocumentDetail(id: UUID, currentUser: User) DocumentResponse
+    +uploadOriginalDocument(title: String, file: MultipartFile, currentUser: User) : DocumentResponse
+    +getOriginalDocumentDetail(id: UUID, currentUser: User) : DocumentResponse
   }
   class DocumentServiceImpl {
     -DocumentUploadCoordinator uploadCoordinator
     -DocumentRepository documentRepository
-    +uploadOriginalDocument(title: String, file: MultipartFile, currentUser: User) DocumentResponse
-    +getOriginalDocumentDetail(id: UUID, currentUser: User) DocumentResponse
+    +uploadOriginalDocument(title: String, file: MultipartFile, currentUser: User) : DocumentResponse
+    +getOriginalDocumentDetail(id: UUID, currentUser: User) : DocumentResponse
   }
   class DocumentUploadCoordinator {
     -FileStorageService fileStorageService
     -FileValidationService fileValidationService
-    +coordinate(file: MultipartFile) SinglePassStorageResult
+    +coordinate(file: MultipartFile) : SinglePassStorageResult
   }
   class FileStorageService {
     -String uploadDir
     -String tempUploadDir
-    +storeTempFile(inputStream: InputStream) SinglePassStorageResult
-    +finalizeFile(tempFilePath: Path, hash: String) Path
-    +deleteFileQuietly(filePath: Path) void
+    +storeTempFile(inputStream: InputStream) : SinglePassStorageResult
+    +finalizeFile(tempFilePath: Path, hash: String) : Path
+    +deleteFileQuietly(filePath: Path) : void
   }
   class DocumentRepository {
     <<interface>>
-    +findByIdForUpdate(id: UUID) Optional~Document~
-    +findOrphanHashes(hashes: String[]) List~String~
-    +claimTask(workerId: String, now: LocalDateTime) int
-    +updateCheckpoint(id: UUID, workerId: String, chunkIndex: int, now: LocalDateTime) int
-    +updateTaskStatus(id: UUID, workerId: String, status: String, now: LocalDateTime) int
-    +resetProcessingTasksToReady(now: LocalDateTime) int
+    +findByIdForUpdate(id: UUID) : Optional~Document~
+    +findOrphanHashes(hashes: List~String~) : List~String~
+    +claimTask(workerId: String, now: LocalDateTime) : int
+    +updateCheckpoint(id: UUID, workerId: String, chunkIndex: int, now: LocalDateTime) : int
+    +updateTaskStatus(id: UUID, workerId: String, status: String, now: LocalDateTime) : int
+    +resetProcessingTasksToReady(now: LocalDateTime) : int
   }
   class WorkerScheduler {
     -WorkerExecutor workerExecutor
     -ThreadPoolTaskExecutor taskExecutor
-    +start() void
-    +stop() void
-    +isRunning() boolean
-    +pollTasks() void
+    +start() : void
+    +stop() : void
+    +isRunning() : boolean
+    +pollTasks() : void
   }
   class WorkerExecutor {
     -MockProcessingService mockProcessingService
     -CheckpointService checkpointService
     -DocumentRepository documentRepository
-    +executeTask(taskId: UUID, workerId: String) void
+    +executeTask(taskId: UUID, workerId: String) : void
   }
   class MockProcessingService {
     -long chunkProcessingTimeMs
-    +processChunk(documentId: UUID, chunkIndex: int) void
+    +processChunk(documentId: UUID, chunkIndex: int) : void
   }
   class CheckpointService {
     -DocumentRepository documentRepository
-    +commitCheckpoint(id: UUID, workerId: String, chunkIndex: int) void
+    +commitCheckpoint(id: UUID, workerId: String, chunkIndex: int) : void
   }
   class RecoveryService {
     -DocumentRepository documentRepository
     -WorkerScheduler workerScheduler
-    +run(args: ApplicationArguments) void
+    +run(args: ApplicationArguments) : void
   }
 
   UploadController --> DocumentService
@@ -187,36 +187,36 @@ Sơ đồ Entity-Relationship (ER) thể hiện lược đồ cấu trúc các b
 erDiagram
   departments {
     uuid id PK
-    varchar code UK
+    varchar code "UK"
     varchar name
   }
   users {
     uuid id PK
-    varchar username UK
-    varchar email UK
+    varchar username "UK"
+    varchar email "UK"
     varchar password_hash
     varchar role
     uuid department_id FK
   }
   documents {
     uuid id PK
-    varchar business_code UK
+    varchar business_code "UK"
     varchar title
-    varchar file_reference NULL
-    bigint file_size NULL
-    varchar hash NULL
+    varchar file_reference "NULL"
+    bigint file_size "NULL"
+    varchar hash "NULL"
     uuid owner_department_id FK
     uuid parent_id FK "NULL"
     uuid creator_department_id FK "NULL"
     uuid created_by FK "NULL"
     timestamp created_at
-    timestamp updated_at NULL
-    timestamp deleted_at NULL
-    varchar status NULL
-    varchar worker_id NULL
-    integer retry_count NULL
-    integer last_completed_chunk NULL
-    integer total_chunks NULL
+    timestamp updated_at "NULL"
+    timestamp deleted_at "NULL"
+    varchar status "NULL"
+    varchar worker_id "NULL"
+    integer retry_count "NULL"
+    integer last_completed_chunk "NULL"
+    integer total_chunks "NULL"
   }
 
   departments ||--o{ users : "has"
@@ -481,25 +481,25 @@ Sơ đồ dưới đây phân định ranh giới giao dịch (Transaction Bound
 
 ```mermaid
 flowchart TD
-  subgraph Upload Flow
+  subgraph upload_flow ["Upload Flow"]
     U1[Tải file lên & validate] --> U2[Mở DB Transaction REQUIRED]
     U2 --> U3[Isolation Level: READ_COMMITTED]
     U3 --> U4[Ghi metadata READY & Commit Transaction]
   end
 
-  subgraph Claim Task Flow
+  subgraph claim_task_flow ["Claim Task Flow"]
     C1[Scheduler quét DB] --> C2[Mở DB Transaction REQUIRED]
     C2 --> C3[Locking: FOR UPDATE SKIP LOCKED]
     C3 --> C4[Update status = PROCESSING, worker_id & Commit]
   end
 
-  subgraph Checkpoint Flow
+  subgraph checkpoint_flow ["Checkpoint Flow"]
     CP1[Xử lý xong Chunk K] --> CP2[Mở DB Transaction REQUIRES_NEW]
     CP2 --> CP3[Isolation Level: READ_COMMITTED]
     CP3 --> CP4[UPDATE checkpoint & Commit độc lập ngay lập tức]
   end
 
-  subgraph Terminate Flow
+  subgraph terminate_flow ["Terminate Flow"]
     T1[Hoàn thành toàn bộ / Lỗi vĩnh viễn] --> T2[Mở DB Transaction REQUIRED]
     T2 --> T3[Update status = COMPLETED/FAILED, worker_id = NULL]
     T3 --> T4[Commit transaction]
@@ -724,7 +724,7 @@ sequenceDiagram
     DB-->>API: Ghi nhận thành công
     API-->>Client: Trả về HTTP 202 Accepted & Document ID
 
-    Note over Sched, Exec: Luồng chạy ngầm của Background Worker bắt đầu
+    Note over Sched,Exec: Luồng chạy ngầm của Background Worker bắt đầu
     loop Thăm dò định kỳ (mỗi 1 giây)
         Sched->>DB: Claim task thô nguyên tử qua CTE (FOR UPDATE SKIP LOCKED)
         DB-->>Sched: Trả về thông tin task claim thành công (id, last_completed_chunk, fileReference)
@@ -759,7 +759,7 @@ sequenceDiagram
     participant Sched as WorkerScheduler
     participant Exec as WorkerExecutor
     
-    Note over Exec, DB: Worker đang xử lý tác vụ, đã commit checkpoint = 3 thành công
+    Note over Exec,DB: Worker đang xử lý tác vụ, đã commit checkpoint = 3 thành công
     Note over OS: MÁY CHỦ BỊ SẬP NGUỒN ĐỘT NGỘT
     Note over DB: Dữ liệu DB được bảo toàn (status = PROCESSING, checkpoint = 3)
     
@@ -819,9 +819,9 @@ stateDiagram-v2
         CheckpointLoop --> CheckpointLoop : Xử lý thành công chunk K & ghi checkpoint
     }
     
-    PROCESSING --> READY : 1. Lỗi tạm thời (Thử lại tăng retry_count)<br>2. Sập nguồn (Startup Recovery reset khi khởi động)
+    PROCESSING --> READY : Lỗi tạm thời hoặc Sập nguồn (Startup Recovery)
     PROCESSING --> COMPLETED : Hoàn thành xử lý toàn bộ phân đoạn thành công
-    PROCESSING --> FAILED : 1. Lỗi dữ liệu vĩnh viễn<br>2. Vượt quá giới hạn retry tối đa (retry_count >= 5)
+    PROCESSING --> FAILED : Lỗi dữ liệu vĩnh viễn hoặc Vượt quá giới hạn retry
     
     COMPLETED --> [*]
     FAILED --> [*]
