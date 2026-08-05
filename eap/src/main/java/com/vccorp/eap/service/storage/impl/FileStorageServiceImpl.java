@@ -24,7 +24,7 @@ import java.util.UUID;
 
 /**
  * Triển khai FileStorageService với cơ chế 1-pass streaming SHA-256 và atomic rename (§1.1, §4.1).
- * Gói: com.vccorp.eap.service.storage.impl
+ * Hỗ trợ fallback copy-delete và hash verification (§9.3).
  */
 @Service
 public class FileStorageServiceImpl implements FileStorageService {
@@ -38,11 +38,6 @@ public class FileStorageServiceImpl implements FileStorageService {
     @Value("${eap.upload.temp-dir:./eap-storage/tmp}")
     private String tempUploadDir;
 
-    /**
-     * Đọc stream 1-pass, vừa ghi file tạm vừa tính SHA-256 (§4.1).
-     * Tên file tạm: temp_<uuid> tại /eap-storage/tmp/.
-     * Nếu xảy ra lỗi giữa chừng, file tạm được xóa để tránh rác đĩa.
-     */
     @Override
     public SinglePassStorageResult storeTempFile(InputStream inputStream) throws IOException {
         File tmpDir = new File(tempUploadDir).getAbsoluteFile();
@@ -68,7 +63,6 @@ public class FileStorageServiceImpl implements FileStorageService {
                 fileSize += bytesRead;
             }
         } catch (IOException e) {
-            // Xóa file tạm chưa hoàn chỉnh để tránh rác đĩa
             deleteTempFileQuietly(tempFilePath);
             throw e;
         }
@@ -78,11 +72,6 @@ public class FileStorageServiceImpl implements FileStorageService {
         return new SinglePassStorageResult(hash, fileSize, tempFilePath);
     }
 
-    /**
-     * Di chuyển file tạm sang /eap-storage/{hash} bằng atomic rename (§4.2, ADR-013).
-     * Nếu tệp đích đã tồn tại (do phòng ban khác vừa ghi), bắt FileAlreadyExistsException
-     * và tái sử dụng đường dẫn tệp đích có sẵn.
-     */
     @Override
     public String moveTempToPermanent(Path tempFilePath, String hash) {
         File storageDir = new File(uploadDir).getAbsoluteFile();
@@ -94,9 +83,9 @@ public class FileStorageServiceImpl implements FileStorageService {
         }
         Path targetPath = storageDir.toPath().resolve(hash);
 
-        // Pre-check if target file already exists to avoid throwing and catching FileAlreadyExistsException in the common case
         if (Files.exists(targetPath)) {
             log.debug("Physical file already exists (pre-check), reuse existing file={}", hash);
+            deleteTempFileQuietly(tempFilePath);
             return targetPath.toAbsolutePath().toString();
         }
 
@@ -109,15 +98,38 @@ public class FileStorageServiceImpl implements FileStorageService {
             deleteTempFileQuietly(tempFilePath);
             return targetPath.toAbsolutePath().toString();
         } catch (IOException e) {
-            // SIS cross-department race: phòng ban khác vừa atomic rename thành công trước.
-            // Tệp đích đã có, tệp tạm sẽ được xóa bởi finally block của DocumentServiceImpl (§4.2).
-            throw new BusinessException(ErrorCode.ERR_SYSTEM_ERROR, "Không thể tải tệp lên hệ thống!");
+            log.warn("Atomic move failed, attempting copy-delete fallback", e);
+            return performFallbackCopyDelete(tempFilePath, targetPath, hash);
         }
     }
 
-    /**
-     * Xóa tệp tạm yên lặng trong finally block (§1.1, §4.2).
-     */
+    private String performFallbackCopyDelete(Path tempFilePath, Path targetPath, String hash) {
+        if (Files.exists(targetPath)) {
+            log.debug("Physical file already exists (fallback check), reuse existing file={}", hash);
+            deleteTempFileQuietly(tempFilePath);
+            return targetPath.toAbsolutePath().toString();
+        }
+
+        try {
+            Files.copy(tempFilePath, targetPath, StandardCopyOption.REPLACE_EXISTING);
+            String targetHash = calculateFileHash(targetPath);
+
+            if (targetHash.equals(hash)) {
+                Files.deleteIfExists(tempFilePath);
+                log.debug("Fallback copy-delete success: {} -> {}", tempFilePath, targetPath);
+                return targetPath.toAbsolutePath().toString();
+            } else {
+                Files.deleteIfExists(targetPath);
+                throw new BusinessException(ErrorCode.ERR_HASH_MISMATCH, "Tải tệp thất bại: Sai mã băm hash sau khi sao chép.");
+            }
+        } catch (IOException fallbackEx) {
+            try {
+                Files.deleteIfExists(targetPath);
+            } catch (IOException ignored) {}
+            throw new BusinessException(ErrorCode.ERR_STORAGE_ERROR, "Lỗi lưu trữ tệp (fallback): " + fallbackEx.getMessage(), fallbackEx);
+        }
+    }
+
     @Override
     public void deleteTempFileQuietly(Path tempFilePath)  {
         if (tempFilePath == null) return;
@@ -129,9 +141,6 @@ public class FileStorageServiceImpl implements FileStorageService {
         }
     }
 
-    /**
-     * Đọc toàn bộ nội dung tệp vật lý (tương thích ngược cho resolveAlias §8.1).
-     */
     @Override
     public byte[] loadFile(String fileReference) throws IOException {
         File file = new File(fileReference);
@@ -151,6 +160,23 @@ public class FileStorageServiceImpl implements FileStorageService {
         } catch (InvalidPathException e) {
             return false;
         }
+    }
+
+    private String calculateFileHash(Path path) throws IOException {
+        MessageDigest digest;
+        try {
+            digest = MessageDigest.getInstance("SHA-256");
+        } catch (NoSuchAlgorithmException e) {
+            throw new IOException("SHA-256 algorithm not available", e);
+        }
+        try (InputStream fis = Files.newInputStream(path)) {
+            byte[] buffer = new byte[BUFFER_SIZE];
+            int bytesRead;
+            while ((bytesRead = fis.read(buffer)) != -1) {
+                digest.update(buffer, 0, bytesRead);
+            }
+        }
+        return bytesToHex(digest.digest());
     }
 
     private String bytesToHex(byte[] bytes) {

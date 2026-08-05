@@ -1,5 +1,24 @@
 package com.vccorp.eap.service.impl;
 
+import java.io.IOException;
+import java.nio.file.Path;
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.stream.Collectors;
+
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.web.multipart.MultipartFile;
+
 import com.vccorp.eap.common.error.ErrorCode;
 import com.vccorp.eap.common.exception.BusinessException;
 import com.vccorp.eap.common.exception.ConcurrentUploadTimeoutException;
@@ -14,99 +33,61 @@ import com.vccorp.eap.service.DocumentService;
 import com.vccorp.eap.service.allocator.BusinessCodeAllocator;
 import com.vccorp.eap.service.coordinator.DocumentUploadCoordinator;
 import com.vccorp.eap.service.helper.DeduplicationQueryResult;
-import com.vccorp.eap.service.helper.DocumentDeduplicationHelper;
+import com.vccorp.eap.service.helper.DocumentDeduplicationManager;
 import com.vccorp.eap.service.helper.UploadTransactionResult;
-import com.vccorp.eap.service.lock.DocumentAdvisoryLockHandler;
+import com.vccorp.eap.service.mapper.DocumentMapper;
 import com.vccorp.eap.service.storage.FileStorageService;
 import com.vccorp.eap.service.storage.SinglePassStorageResult;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.dao.DataIntegrityViolationException;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageRequest;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.PlatformTransactionManager;
-import org.springframework.transaction.TransactionDefinition;
-import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.support.TransactionTemplate;
-import org.springframework.web.multipart.MultipartFile;
+import com.vccorp.eap.service.validation.UploadValidator;
 
-import java.io.IOException;
-import java.nio.file.Path;
-import java.time.LocalDateTime;
-import java.util.List;
-import java.util.UUID;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.stream.Collectors;
-
-/**
- * Orchestrator chính điều phối toàn bộ luồng tải lên tài liệu (§1.4, §4.2, §8.2).
- * Trách nhiệm:
- * - Kiểm tra quyền (RBAC)
- * - Điều phối Pha 1 (ngoài giao dịch): Fast-Check
- * - Điều phối Pha 2 (trong giao dịch): Advisory Lock → Double-Check → Lưu tệp → INSERT
- * - Quản lý vòng đời tệp tạm qua try-finally
- * - Xử lý DataIntegrityViolationException (lá chắn cuối §6.2)
- */
 @Service
 public class DocumentServiceImpl implements DocumentService {
-
-    private static final Logger log = LoggerFactory.getLogger(DocumentServiceImpl.class);
-
     @Value("${eap.retry.max-attempts:5}")
-    private int maxLockRetries = 5;
+    private final int maxLockRetries = 5;
 
     @Value("${eap.retry.base-delay-ms:350}")
-    private long baseDelayMs = 350;
+    private final long baseDelayMs = 350;
 
     @Value("${eap.retry.max-delay-ms:2000}")
-    private long maxDelayMs = 2000;
+    private final long maxDelayMs = 2000;
 
     private final DocumentRepository documentRepository;
     private final DepartmentRepository departmentRepository;
     private final FileStorageService fileStorageService;
-    private final DocumentAdvisoryLockHandler advisoryLockHandler;
-    private final DocumentDeduplicationHelper deduplicationHelper;
+    private final DocumentDeduplicationManager deduplicationManager;
     private final DocumentUploadCoordinator uploadCoordinator;
     private final BusinessCodeAllocator businessCodeAllocator;
     private final TransactionTemplate transactionTemplate;
-    private final JdbcTemplate jdbcTemplate;
+    private final UploadValidator uploadValidator;
+    private final DocumentMapper documentMapper;
 
     public DocumentServiceImpl(DocumentRepository documentRepository,
                                DepartmentRepository departmentRepository,
                                FileStorageService fileStorageService,
-                               DocumentAdvisoryLockHandler advisoryLockHandler,
-                               DocumentDeduplicationHelper deduplicationHelper,
+                               DocumentDeduplicationManager deduplicationManager,
                                DocumentUploadCoordinator uploadCoordinator,
                                BusinessCodeAllocator businessCodeAllocator,
                                PlatformTransactionManager transactionManager,
-                               JdbcTemplate jdbcTemplate) {
+                               UploadValidator uploadValidator,
+                               DocumentMapper documentMapper) {
         this.documentRepository = documentRepository;
         this.departmentRepository = departmentRepository;
         this.fileStorageService = fileStorageService;
-        this.advisoryLockHandler = advisoryLockHandler;
-        this.deduplicationHelper = deduplicationHelper;
+        this.deduplicationManager = deduplicationManager;
         this.uploadCoordinator = uploadCoordinator;
         this.businessCodeAllocator = businessCodeAllocator;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
         this.transactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRED);
-        this.jdbcTemplate = jdbcTemplate;
+        this.uploadValidator = uploadValidator;
+        this.documentMapper = documentMapper;
     }
 
     @Override
     public DocumentResponse uploadOriginalDocument(String title, MultipartFile file, User currentUser) {
-        // Bước 1: Validate vai trò và dữ liệu đầu vào
-        validateUserRole(currentUser);
-        validateTitle(title);
+        uploadValidator.validateUserRole(currentUser);
+        uploadValidator.validateTitle(title);
+        uploadValidator.validateUserDepartment(currentUser);
 
-        if (currentUser.getDepartmentId() == null) {
-            throw new BusinessException(ErrorCode.VALIDATION_ERROR,
-                    "Người dùng chưa được gán vào phòng ban. Vui lòng liên hệ quản trị viên.");
-        }
-
-        // Bước 2: Pha 1 — Validation + Ghi tệp tạm + Tính hash (§4.2 Phương thức chính bước 3)
         SinglePassStorageResult storageResult;
         try {
             storageResult = uploadCoordinator.coordinate(file);
@@ -119,64 +100,58 @@ public class DocumentServiceImpl implements DocumentService {
         long fileSize = storageResult.getFileSize();
         UUID departmentId = currentUser.getDepartmentId();
 
-        // Bước 3: Bảo vệ tài nguyên bằng try-finally
         AtomicBoolean tempFileMoved = new AtomicBoolean(false);
         try {
-            // Bước 4: Fast-Check ngoài giao dịch
-            fastCheckDuplicate(hash, departmentId);
+            deduplicationManager.fastCheckDuplicate(hash, departmentId);
 
-            // Bước 5: Pha 2 — Single-Connection TransactionTemplate với retry loop ngoài giao dịch
+            // Kiểm tra trùng lặp gộp ngoài transaction để tìm file cũ có thể tái sử dụng
+            DeduplicationQueryResult preCheck = deduplicationManager.doubleCheckDuplicate(hash, departmentId);
+            String oldestFileRef = preCheck != null ? preCheck.getOldestFileRef() : null;
+
+            String fileReference;
+            if (oldestFileRef != null && fileStorageService.exists(oldestFileRef)) {
+                fileReference = oldestFileRef;
+                fileStorageService.deleteTempFileQuietly(tempFilePath);
+                tempFileMoved.set(true);
+            } else {
+                // Di chuyển file tạm sang thư mục chính thức bên ngoài Transaction DB để rút ngắn transaction
+                fileReference = fileStorageService.moveTempToPermanent(tempFilePath, hash);
+                tempFileMoved.set(true);
+            }
+
             for (int i = 0; i < maxLockRetries; i++) {
                 try {
                     UploadTransactionResult txResult = transactionTemplate.execute(status -> {
-                        // Thử lấy khóa cố vấn (nếu không lấy được, PostgreSQL sẽ trả về false hoặc ném exception nếu DB lỗi)
-                        boolean acquired = advisoryLockHandler.tryAcquireLock(departmentId, hash);
+                        boolean acquired = deduplicationManager.tryAcquireLock(departmentId, hash);
                         if (!acquired) {
-                            // Không lấy được khóa -> Rollback ngay giao dịch hiện tại để giải phóng Connection về Pool
                             status.setRollbackOnly();
                             return UploadTransactionResult.lockBusy();
                         }
 
-                        // Double-Check trong giao dịch
-                        DeduplicationQueryResult doubleCheck = deduplicationHelper.executeAggregateCheck(jdbcTemplate, hash, departmentId);
-
+                        DeduplicationQueryResult doubleCheck = deduplicationManager.doubleCheckDuplicate(hash, departmentId);
                         if (doubleCheck.isHasActiveInDept()) {
-                            // Luồng khác vừa commit thành công trong khi chờ khóa
-                            log.debug("Double-Check: duplicate detected for hash={}, dept={}", hash, departmentId);
                             status.setRollbackOnly();
-
                             throw new BusinessException(ErrorCode.ERR_DUPLICATE_DOCUMENT, "Tài liệu đã tồn tại trong phòng ban.");
                         }
 
-                        // Bước lưu trữ vật lý (§4.2 bước 4)
-                        String fileReference = resolveFileReference(doubleCheck, tempFilePath, hash, tempFileMoved);
-
-                        // INSERT metadata (§4.2 bước 5, Query 3) - sử dụng saveAndFlush để kích hoạt lỗi Unique constraint ngay trong transaction block
                         Document document = createDocument(title, hash, fileReference, fileSize, departmentId, currentUser);
                         Document saved = documentRepository.saveAndFlush(document);
-                        return UploadTransactionResult.success(mapToResponse(saved));
+                        return UploadTransactionResult.success(documentMapper.mapToResponse(saved));
                     });
 
-                    if (txResult != null) {
-                        if (txResult.status() == UploadTransactionResult.Status.SUCCESS) {
-                            return txResult.response();
-                        }
+                    if (txResult != null && txResult.status() == UploadTransactionResult.Status.SUCCESS) {
+                        return txResult.response();
                     }
                 } catch (DataIntegrityViolationException e) {
-                    // §6.2: Lá chắn cuối — vi phạm UNIQUE constraint bất thường
-                    log.warn("UNIQUE constraint violation (last-resort) for hash={}, dept={}", hash, departmentId, e);
-
                     throw new BusinessException(ErrorCode.ERR_DUPLICATE_DOCUMENT, "Tài liệu đã tồn tại trong phòng ban.");
                 }
 
-                // Nếu khóa bị bận (Status.LOCK_BUSY), ngủ ngoài giao dịch (không giữ Connection) rồi thử lại
                 if (i < maxLockRetries - 1) {
                     sleepWithJitter(i);
                 }
             }
             throw new ConcurrentUploadTimeoutException();
         } finally {
-            // §4.2 Khối Dọn dẹp: xóa tệp tạm nếu chưa được atomic rename
             if (!tempFileMoved.get()) {
                 fileStorageService.deleteTempFileQuietly(tempFilePath);
             }
@@ -186,27 +161,27 @@ public class DocumentServiceImpl implements DocumentService {
     @Override
     @Transactional(readOnly = true)
     public Page<DocumentResponse> listOriginalDocuments(int page, int size, User currentUser) {
-        validateUserRole(currentUser);
+        uploadValidator.validateUserRole(currentUser);
         PageRequest pageRequest = PageRequest.of(page, size);
         Page<Document> documents = documentRepository.findByParentIdIsNullAndOwnerDepartmentId(
                 currentUser.getDepartmentId(), pageRequest);
-        return documents.map(this::mapToResponse);
+        return documents.map(documentMapper::mapToResponse);
     }
 
     @Override
     @Transactional(readOnly = true)
     public Page<DocumentResponse> listSharedDocuments(int page, int size, User currentUser) {
-        validateUserRole(currentUser);
+        uploadValidator.validateUserRole(currentUser);
         PageRequest pageRequest = PageRequest.of(page, size);
         Page<Document> documents = documentRepository.findByParentIdIsNotNullAndOwnerDepartmentId(
                 currentUser.getDepartmentId(), pageRequest);
-        return documents.map(this::mapToResponse);
+        return documents.map(documentMapper::mapToResponse);
     }
 
     @Override
     @Transactional(readOnly = true)
     public DocumentResponse getOriginalDocumentDetail(UUID id, User currentUser) {
-        validateUserRole(currentUser);
+        uploadValidator.validateUserRole(currentUser);
         Document document = findDocumentById(id);
 
         if (document.getDeletedAt() != null) {
@@ -228,23 +203,23 @@ public class DocumentServiceImpl implements DocumentService {
             }
         }
 
-        return mapToResponse(document);
+        return documentMapper.mapToResponse(document);
     }
 
     @Override
     @Transactional(readOnly = true)
     public List<DocumentResponse> listDocumentAliases(UUID id, User currentUser) {
-        validateUserRole(currentUser);
+        uploadValidator.validateUserRole(currentUser);
         DocumentResponse doc = getOriginalDocumentDetail(id, currentUser);
         return documentRepository.findAllByParentIdAndDeletedAtIsNull(doc.getId()).stream()
-                .map(this::mapToResponse)
+                .map(documentMapper::mapToResponse)
                 .collect(Collectors.toList());
     }
 
     @Override
     @Transactional
     public DocumentResponse updateOriginalDocument(UUID id, String title, User currentUser) {
-        validateUserRole(currentUser);
+        uploadValidator.validateUserRole(currentUser);
         Document document = findDocumentById(id);
 
         if (document.getDeletedAt() != null) {
@@ -261,19 +236,18 @@ public class DocumentServiceImpl implements DocumentService {
 
         if (title != null && !title.trim().isEmpty()) {
             if (title.trim().length() > 255) {
-                throw new BusinessException(ErrorCode.VALIDATION_ERROR,
-                        "Tiêu đề tài liệu không được vượt quá 255 ký tự.");
+                throw new BusinessException(ErrorCode.VALIDATION_ERROR, "Tiêu đề tài liệu không được vượt quá 255 ký tự.");
             }
             document.setTitle(title.trim());
         }
         document.setUpdatedAt(LocalDateTime.now());
-        return mapToResponse(documentRepository.save(document));
+        return documentMapper.mapToResponse(documentRepository.save(document));
     }
 
     @Override
     @Transactional
     public void deleteOriginalDocument(UUID id, User currentUser) {
-        validateUserRole(currentUser);
+        uploadValidator.validateUserRole(currentUser);
         Document originalDoc = documentRepository.findByIdForUpdate(id)
                 .orElseThrow(() -> new BusinessException(ErrorCode.ERR_DOCUMENT_NOT_FOUND));
 
@@ -298,42 +272,38 @@ public class DocumentServiceImpl implements DocumentService {
     @Override
     @Transactional
     public DocumentResponse createAlias(CreateAliasRequest request, User currentUser) {
-        validateUserRole(currentUser);
+        uploadValidator.validateUserRole(currentUser);
         if (currentUser.getRole() == Role.ROLE_BOARD) {
-            throw new BusinessException(ErrorCode.ERR_FORBIDDEN_ROLE,
-                    "Ban Giám Đốc không được phép tạo liên kết Alias.");
+            throw new BusinessException(ErrorCode.ERR_FORBIDDEN_ROLE, "Ban Giám Đốc không được phép tạo liên kết Alias.");
         }
 
         if (request.originalDocumentId() == null || request.aliasDepartmentId() == null) {
-            throw new BusinessException(ErrorCode.VALIDATION_ERROR,
-                    "ID tài liệu gốc và ID phòng ban nhận không được trống.");
+            throw new BusinessException(ErrorCode.VALIDATION_ERROR, "ID tài liệu gốc và ID phòng ban nhận không được trống.");
         }
 
         Document originalDoc = documentRepository.findByIdForUpdate(request.originalDocumentId())
                 .orElseThrow(() -> new BusinessException(ErrorCode.ERR_DOCUMENT_NOT_FOUND));
 
         if (!originalDoc.isOriginal()) {
-            throw new BusinessException(ErrorCode.VALIDATION_ERROR,
-                    "Không thể tạo liên kết cho một tài liệu Alias khác.");
+            throw new BusinessException(ErrorCode.VALIDATION_ERROR, "Không thể tạo liên kết cho một tài liệu Alias khác.");
         }
 
         if (!departmentRepository.existsById(request.aliasDepartmentId())) {
             throw new BusinessException(ErrorCode.VALIDATION_ERROR, "Phòng ban nhận không tồn tại.");
         }
 
-        validateAliasTargetDepartment(request.aliasDepartmentId());
+        uploadValidator.validateAliasTargetDepartment(request.aliasDepartmentId());
 
         if (!originalDoc.getOwnerDepartmentId().equals(currentUser.getDepartmentId())) {
             throw new BusinessException(ErrorCode.ERR_OWNERSHIP_VIOLATION);
         }
 
-        if (isBoardDepartment(originalDoc.getOwnerDepartmentId())) {
+        if (uploadValidator.isBoardDepartment(originalDoc.getOwnerDepartmentId())) {
             throw new BusinessException(ErrorCode.ERR_BOARD_PROTECTION);
         }
 
         if (originalDoc.getOwnerDepartmentId().equals(request.aliasDepartmentId())) {
-            throw new BusinessException(ErrorCode.VALIDATION_ERROR,
-                    "Không thể tự chia sẻ tài liệu cho chính phòng ban của mình.");
+            throw new BusinessException(ErrorCode.VALIDATION_ERROR, "Không thể tự chia sẻ tài liệu cho chính phòng ban của mình.");
         }
 
         boolean exists = documentRepository.existsByParentIdAndOwnerDepartmentIdAndDeletedAtIsNull(
@@ -360,10 +330,15 @@ public class DocumentServiceImpl implements DocumentService {
                 .creatorDepartmentId(originalDoc.getOwnerDepartmentId())
                 .createdBy(currentUser.getId())
                 .createdAt(LocalDateTime.now())
+                .status(null)
+                .workerId(null)
+                .retryCount(null)
+                .lastCompletedChunk(null)
+                .totalChunks(null)
                 .build();
 
         try {
-            return mapToResponse(documentRepository.saveAndFlush(aliasDoc));
+            return documentMapper.mapToResponse(documentRepository.saveAndFlush(aliasDoc));
         } catch (DataIntegrityViolationException e) {
             throw new BusinessException(ErrorCode.ERR_DUPLICATE_ALIAS);
         }
@@ -372,7 +347,7 @@ public class DocumentServiceImpl implements DocumentService {
     @Override
     @Transactional
     public void deleteAlias(UUID id, User currentUser) {
-        validateUserRole(currentUser);
+        uploadValidator.validateUserRole(currentUser);
         Document alias = documentRepository.findById(id)
                 .orElseThrow(() -> new BusinessException(ErrorCode.ERR_DOCUMENT_NOT_FOUND));
 
@@ -388,8 +363,7 @@ public class DocumentServiceImpl implements DocumentService {
         }
 
         if (currentUser.getRole() != Role.ROLE_DEPT_MANAGER && currentUser.getRole() != Role.ROLE_EMPLOYEE) {
-            throw new BusinessException(ErrorCode.ERR_FORBIDDEN_ROLE,
-                    "Chỉ Trưởng phòng hoặc Nhân viên mới được phép thu hồi liên kết Alias.");
+            throw new BusinessException(ErrorCode.ERR_FORBIDDEN_ROLE, "Chỉ Trưởng phòng hoặc Nhân viên mới được phép thu hồi liên kết Alias.");
         }
 
         alias.setDeletedAt(LocalDateTime.now());
@@ -399,7 +373,7 @@ public class DocumentServiceImpl implements DocumentService {
     @Override
     @Transactional(readOnly = true)
     public byte[] resolveAlias(UUID id, User currentUser) {
-        validateUserRole(currentUser);
+        uploadValidator.validateUserRole(currentUser);
         Document doc = findDocumentById(id);
 
         if (doc.getDeletedAt() != null) {
@@ -425,65 +399,15 @@ public class DocumentServiceImpl implements DocumentService {
         }
     }
 
-    private void validateUserRole(User user) {
-        if (user == null) {
-            throw new BusinessException(ErrorCode.ERR_UNAUTHENTICATED);
-        }
-        if (user.getRole() == Role.SYSTEM_ADMIN) {
-            throw new BusinessException(ErrorCode.ERR_FORBIDDEN_ROLE, "Quản trị viên hệ thống không được phép thao tác tài liệu.");
-        }
-    }
-
-    private void validateTitle(String title) {
-        if (title == null || title.trim().isEmpty()) {
-            throw new BusinessException(ErrorCode.VALIDATION_ERROR, "Tiêu đề và tệp đính kèm không được trống.");
-        }
-        if (title.trim().length() > 255) {
-            throw new BusinessException(ErrorCode.VALIDATION_ERROR, "Tiêu đề tài liệu không được vượt quá 255 ký tự.");
-        }
-    }
-
     private Document findDocumentById(UUID id) {
         return documentRepository.findById(id)
                 .orElseThrow(() -> new BusinessException(ErrorCode.ERR_DOCUMENT_NOT_FOUND));
     }
 
-    /**
-     * Map Document entity → DocumentResponse DTO.
-     * @param doc        entity
-     */
-    private DocumentResponse mapToResponse(Document doc) {
-        if (doc == null) return null;
-        return DocumentResponse.builder(
-                        doc.getId(), doc.getBusinessCode(), doc.getTitle(),
-                        doc.getOwnerDepartmentId(), doc.getCreatedAt())
-                .fileSize(doc.getFileSize())
-                .hash(doc.getHash())
-                .parentId(doc.getParentId())
-                .creatorDepartmentId(doc.getCreatorDepartmentId())
-                .createdBy(doc.getCreatedBy())
-                .updatedAt(doc.getUpdatedAt())
-                .build();
-    }
-
-    private void validateAliasTargetDepartment(UUID aliasDepartmentId) {
-        if (isBoardDepartment(aliasDepartmentId)) {
-            throw new BusinessException(ErrorCode.ERR_BOARD_PROTECTION,
-                    "Không thể chia sẻ tài liệu đến phòng Ban Giám Đốc.");
-        }
-    }
-
-    private boolean isBoardDepartment(UUID deptId) {
-        if (deptId == null) return false;
-        return departmentRepository.findById(deptId)
-                .map(d -> "BOARD".equalsIgnoreCase(d.getCode()))
-                .orElse(false);
-    }
-
     private void sleepWithJitter(int retryCount) {
         try {
             long delayTemp = Math.min(maxDelayMs, baseDelayMs * (1L << retryCount));
-            long jitter = new java.util.Random().nextInt(100) - 50; // Jitter +/- 50ms
+            long jitter = new java.util.Random().nextInt(100) - 50;
             long sleepTime = Math.max(0L, delayTemp + jitter);
             Thread.sleep(sleepTime);
         } catch (InterruptedException e) {
@@ -491,45 +415,25 @@ public class DocumentServiceImpl implements DocumentService {
         }
     }
 
-    /**
-     * Fast-Check ngoài transaction.
-     * Nếu đã tồn tại tài liệu hoạt động cùng hash trong cùng phòng ban
-     * thì dừng ngay và trả về HTTP 409 Conflict.
-     */
-    private void fastCheckDuplicate(String hash, UUID departmentId) {
-        DeduplicationQueryResult result = deduplicationHelper.executeAggregateCheck(jdbcTemplate, hash, departmentId);
-
-        if (result.isHasActiveInDept()) {
-            throw new BusinessException(ErrorCode.ERR_DUPLICATE_DOCUMENT);
-        }
-    }
+    // fastCheckDuplicate has been moved to DocumentDeduplicationManager
 
     private String resolveFileReference(DeduplicationQueryResult result, Path tempFile, String hash, AtomicBoolean moved) {
         String oldestFileRef = result.getOldestFileRef();
-
         if (oldestFileRef != null) {
             if (fileStorageService.exists(oldestFileRef)) {
-                log.debug("SIS: reusing physical file={} for hash={}", oldestFileRef, hash);
                 return oldestFileRef;
-            } else {
-                log.debug("SIS: physical file={} is missing. Creating new physical file.", oldestFileRef);
             }
         }
-        log.debug("Moving temporary file to permanent storage. hash={}", hash);
-
         String fileReference = fileStorageService.moveTempToPermanent(tempFile, hash);
         moved.set(true);
-
         return fileReference;
     }
 
     private Document createDocument(String title, String hash, String fileReference, long fileSize, UUID departmentId, User currentUser) {
-        // Sinh ID với LSB chẵn → tài liệu gốc (không phải alias)
         UUID rawUuid = UUID.randomUUID();
         UUID documentId = new UUID(rawUuid.getMostSignificantBits(),
                 rawUuid.getLeastSignificantBits() & ~1L);
 
-        // Phân bổ business_code từ sequence (§4.2 bước 5, ADR-010)
         String businessCode = businessCodeAllocator.allocate();
 
         return Document.builder()
@@ -542,6 +446,11 @@ public class DocumentServiceImpl implements DocumentService {
                 .ownerDepartmentId(departmentId)
                 .createdBy(currentUser.getId())
                 .createdAt(LocalDateTime.now())
+                .status("READY")
+                .workerId(null)
+                .retryCount(0)
+                .lastCompletedChunk(0)
+                .totalChunks(0)
                 .build();
     }
 }

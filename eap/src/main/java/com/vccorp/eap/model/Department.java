@@ -6,7 +6,7 @@ import java.time.LocalDateTime;
 import java.util.UUID;
 
 @Entity
-@Table(name = "departments")
+@Table(name = "tbl_departments")
 @SQLRestriction("deleted_at IS NULL")
 public class Department {
     @Id

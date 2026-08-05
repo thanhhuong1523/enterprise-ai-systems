@@ -8,13 +8,13 @@ import org.springframework.dao.DataAccessException;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
-import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.nio.file.attribute.FileTime;
 import java.time.Instant;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Stream;
@@ -42,6 +42,8 @@ public class DocumentCleanupJob {
     @Value("${eap.cleanup.orphan-grace-period-ms:600000}")
     private long orphanGracePeriodMs; // mặc định 10 phút
 
+    private int tempDeletedCount = 0;
+
     public DocumentCleanupJob(DocumentRepository documentRepository) {
         this.documentRepository = documentRepository;
     }
@@ -57,6 +59,7 @@ public class DocumentCleanupJob {
         try {
             cleanupTempFiles();
             cleanupOrphanFiles();
+            cleanupDanglingMetadata();
             log.info("Scheduled cleanup job finished successfully in {} ms", System.currentTimeMillis() - startTime);
         } catch (IOException e) {
             log.error("I/O error occurred during scheduled cleanup job", e);
@@ -79,28 +82,27 @@ public class DocumentCleanupJob {
         }
 
         Instant now = Instant.now();
-        int deletedCount = 0;
+        tempDeletedCount = 0;
 
         try (Stream<Path> files = Files.list(tempPath)) {
-            Iterable<Path> iterable = files::iterator;
-            for (Path file : iterable) {
-                if (Files.isRegularFile(file)) {
-                    try {
-                        FileTime lastModified = Files.getLastModifiedTime(file);
-                        long ageMs = now.toEpochMilli() - lastModified.toMillis();
-                        if (ageMs > tempExpirationMs) {
-                            Files.deleteIfExists(file);
-                            log.debug("Deleted expired temp file: {}", file);
-                            deletedCount++;
-                        }
-                    } catch (IOException e) {
-                        log.warn("Failed to check or delete temp file: {}", file, e);
-                    }
-                }
-            }
+            files.filter(Files::isRegularFile).forEach(file -> deleteTempFileIfExpired(file, now));
         }
 
-        log.info("Phase 1 finished. Deleted {} expired temp file(s).", deletedCount);
+        log.info("Phase 1 finished. Deleted {} expired temp file(s).", tempDeletedCount);
+    }
+
+    private void deleteTempFileIfExpired(Path file, Instant now) {
+        try {
+            FileTime lastModified = Files.getLastModifiedTime(file);
+            long ageMs = now.toEpochMilli() - lastModified.toMillis();
+            if (ageMs > tempExpirationMs) {
+                Files.deleteIfExists(file);
+                log.debug("Deleted expired temp file: {}", file);
+                tempDeletedCount++;
+            }
+        } catch (IOException e) {
+            log.warn("Failed to check or delete temp file: {}", file, e);
+        }
     }
 
     /**
@@ -119,22 +121,7 @@ public class DocumentCleanupJob {
         List<String> candidateHashes = new ArrayList<>();
 
         try (Stream<Path> files = Files.list(storagePath)) {
-            Iterable<Path> iterable = files::iterator;
-            for (Path file : iterable) {
-                // Chỉ dọn dẹp các tệp trực tiếp trong thư mục chính thức (không quét thư mục con như tmp)
-                if (Files.isRegularFile(file)) {
-                    try {
-                        FileTime lastModified = Files.getLastModifiedTime(file);
-                        long ageMs = now.toEpochMilli() - lastModified.toMillis();
-                        if (ageMs > orphanGracePeriodMs) {
-                            candidateFiles.add(file);
-                            candidateHashes.add(file.getFileName().toString());
-                        }
-                    } catch (IOException e) {
-                        log.warn("Failed to inspect file age: {}", file, e);
-                    }
-                }
-            }
+            files.filter(Files::isRegularFile).forEach(file -> collectCandidateOrphan(file, now, candidateFiles, candidateHashes));
         }
 
         if (candidateHashes.isEmpty()) {
@@ -144,7 +131,6 @@ public class DocumentCleanupJob {
 
         log.debug("Found {} candidate files for orphan check.", candidateHashes.size());
 
-        // Đối chiếu cơ sở dữ liệu để xác định các mã băm mồ côi
         List<String> orphanHashes = documentRepository.findOrphanHashes(candidateHashes.toArray(new String[0]));
         int deletedCount = 0;
 
@@ -162,5 +148,44 @@ public class DocumentCleanupJob {
         }
 
         log.info("Phase 2 finished. Deleted {} orphaned file(s).", deletedCount);
+    }
+
+    private void collectCandidateOrphan(Path file, Instant now, List<Path> candidateFiles, List<String> candidateHashes) {
+        try {
+            FileTime lastModified = Files.getLastModifiedTime(file);
+            long ageMs = now.toEpochMilli() - lastModified.toMillis();
+            if (ageMs > orphanGracePeriodMs) {
+                candidateFiles.add(file);
+                candidateHashes.add(file.getFileName().toString());
+            }
+        } catch (IOException e) {
+            log.warn("Failed to inspect file age: {}", file, e);
+        }
+    }
+
+    /**
+     * Pha 3: Đối chiếu Metadata lỗi không tồn tại tệp vật lý (Dangling Metadata Check) (§6.5.2)
+     */
+    public void cleanupDanglingMetadata() {
+        log.info("Starting Phase 3: Dangling Metadata Check");
+        List<com.vccorp.eap.model.Document> documents = documentRepository.findDanglingMetadata();
+        int failedCount = 0;
+
+        for (com.vccorp.eap.model.Document doc : documents) {
+            if (checkAndHandleDangling(doc)) {
+                failedCount++;
+            }
+        }
+        log.info("Phase 3 finished. Marked {} dangling metadata task(s) as FAILED.", failedCount);
+    }
+
+    private boolean checkAndHandleDangling(com.vccorp.eap.model.Document doc) {
+        String fileRef = doc.getFileReference();
+        if (fileRef == null || !Files.exists(Path.of(fileRef))) {
+            log.warn("Security Alert: physical file missing for document {}. Setting status to FAILED.", doc.getId());
+            int affected = documentRepository.forceMarkFailed(doc.getId(), LocalDateTime.now());
+            return affected > 0;
+        }
+        return false;
     }
 }
