@@ -5,6 +5,7 @@ import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.apache.poi.xslf.usermodel.XMLSlideShow;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
+import org.apache.tika.Tika;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -20,6 +21,7 @@ public class DocumentPageCounter {
     private static final Logger log = LoggerFactory.getLogger(DocumentPageCounter.class);
 
     private static final int DEFAULT_CHUNKS = 5;
+    private static final Tika tika = new Tika();
 
     /**
      * Đếm số lượng trang/sheet/slide của tệp tài liệu.
@@ -39,23 +41,37 @@ public class DocumentPageCounter {
             return DEFAULT_CHUNKS;
         }
 
-        String fileName = path.getFileName().toString().toLowerCase();
-
         try {
-            if (fileName.endsWith(".pdf")) {
+            // Xác định MIME type bằng Apache Tika (do tệp bị đổi tên thành mã hash và mất extension trong storage)
+            String mimeType = tika.detect(path.toFile());
+            log.info("Detected MIME type: {} for file: {}", mimeType, path.getFileName());
+
+            if ("application/pdf".equals(mimeType)) {
                 return countPdfPages(path);
-            } else if (fileName.endsWith(".docx")) {
+            } else if ("application/vnd.openxmlformats-officedocument.wordprocessingml.document".equals(mimeType)) {
                 return countDocxPages(path);
-            } else if (fileName.endsWith(".xlsx")) {
+            } else if ("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet".equals(mimeType)) {
                 return countXlsxSheets(path);
-            } else if (fileName.endsWith(".pptx")) {
+            } else if ("application/vnd.openxmlformats-officedocument.presentationml.presentation".equals(mimeType)) {
                 return countPptxSlides(path);
             } else {
-                log.info("Định dạng tệp {} không được hỗ trợ đếm trang động. Sử dụng mặc định {}", fileName, DEFAULT_CHUNKS);
+                // Fallback check theo extension trong trường hợp tệp tin vẫn giữ đuôi mở rộng
+                String fileName = path.getFileName().toString().toLowerCase();
+                if (fileName.endsWith(".pdf")) {
+                    return countPdfPages(path);
+                } else if (fileName.endsWith(".docx")) {
+                    return countDocxPages(path);
+                } else if (fileName.endsWith(".xlsx")) {
+                    return countXlsxSheets(path);
+                } else if (fileName.endsWith(".pptx")) {
+                    return countPptxSlides(path);
+                } else {
+                    log.info("Định dạng tệp {} không được hỗ trợ đếm trang động. Sử dụng mặc định {}", fileName, DEFAULT_CHUNKS);
+                }
             }
         } catch (Throwable t) {
             log.warn("Lỗi khi đếm số trang của tệp {}. Sử dụng mặc định {}. Chi tiết lỗi: {}", 
-                    fileName, DEFAULT_CHUNKS, t.getMessage(), t);
+                    path.getFileName(), DEFAULT_CHUNKS, t.getMessage(), t);
         }
 
         return DEFAULT_CHUNKS;
