@@ -109,16 +109,16 @@ Sơ đồ C1 mô tả tương tác cấp hệ thống của các tác nhân vớ
 
 ```mermaid
 graph TD
-    Employee["Nhân viên Nghiệp vụ<br>(HR, Finance, R&D)"]
-    BoardUser["Thành viên Ban Giám đốc<br>(BOARD)"]
-    SysAdmin["Quản trị viên<br>(SYSTEM_ADMIN)"]
-    
-    SystemEAP["Hệ thống VCC-EAP<br>(Spring Boot Monolith)"]
-    
+    Employee["Nhân viên Nghiệp vụ (HR, Finance, R&D)"]
+    BoardUser["Thành viên Ban Giám đốc (BOARD)"]
+    SysAdmin["Quản trị viên (SYSTEM_ADMIN)"]
+
+    SystemEAP["Hệ thống VCC-EAP (Spring Boot Monolith)"]
+
     Employee -->|Tìm kiếm ngữ nghĩa, chia sẻ Alias| SystemEAP
     BoardUser -->|Tìm kiếm tài liệu mật BOARD| SystemEAP
-    SysAdmin -->|Quản trị kỹ thuật & Cấu hình<br>(Không được xem/tìm nội dung)| SystemEAP
-    
+    SysAdmin -->|Quản trị kỹ thuật và cấu hình, không xem hoặc tìm nội dung| SystemEAP
+
     style SystemEAP fill:#1F4E79,stroke:#1A365D,stroke-width:2px,color:#FFFFFF
     style Employee fill:#D84315,stroke:#BF360C,stroke-width:2px,color:#FFFFFF
     style BoardUser fill:#C62828,stroke:#B71C1C,stroke-width:2px,color:#FFFFFF
@@ -130,22 +130,22 @@ Sơ đồ C2 mô tả ranh giới triển khai vật lý của hệ thống:
 
 ```mermaid
 graph TB
-    subgraph ClientLayer ["Tầng Giao diện"]
+    subgraph ClientLayer["Tầng Giao diện"]
         WebApp["Ứng dụng Web (React)"]
     end
 
-    subgraph AppLayer ["Tầng Ứng dụng"]
-        SpringBootApp["Spring Boot Monolith<br>(JVM Process - ONNX Runtime in-process)"]
+    subgraph AppLayer["Tầng Ứng dụng"]
+        SpringBootApp["Spring Boot Monolith (JVM Process - ONNX Runtime in-process)"]
     end
 
-    subgraph StorageLayer ["Tầng Lưu trữ"]
-        FileStorage["File Storage<br>(Lưu tệp tin gốc)"]
-        PostgresDB["PostgreSQL + pgvector<br>(Lưu metadata, chunks và vector embeddings)"]
+    subgraph StorageLayer["Tầng Lưu trữ"]
+        FileStorage["Shared File Storage (NFS - Lưu tệp tin gốc)"]
+        PostgresDB["PostgreSQL + pgvector (Metadata, chunks và vector embeddings)"]
     end
 
-    WebApp -->|HTTP REST API Requests| SpringBootApp
+    WebApp -->|HTTP REST API| SpringBootApp
     SpringBootApp -->|File I/O| FileStorage
-    SpringBootApp -->|JDBC/SQL - vector(1024)| PostgresDB
+    SpringBootApp -->|JDBC / SQL| PostgresDB
 
     style WebApp fill:#E6F2FF,stroke:#0066CC,stroke-width:2px,color:#000000
     style SpringBootApp fill:#E2F0D9,stroke:#385723,stroke-width:2px,color:#000000
