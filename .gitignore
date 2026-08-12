@@ -26,3 +26,8 @@ dist/
 
 # Storage
 eap-storage/
+
+# Model files (large binary files - not tracked in git)
+*.onnx
+*.model
+eap/src/main/resources/onnx/tokenizer.json
