@@ -10,16 +10,17 @@
 | :--- | :--- |
 | **Tiêu đề Tài liệu** | Tài liệu Thiết kế Kiến trúc - Tuần 4 (ADD-004) |
 | **Dự án** | Nền tảng lưu trữ tri thức doanh nghiệp VCC (VCC-EAP) |
-| **Phiên bản** | 1.0 |
+| **Phiên bản** | 1.1 |
 | **Trạng thái** | Hoàn thiện |
 | **Tác giả** | Senior Software Architect / Solution Architect |
-| **Ngày phát hành** | 2026-08-07 |
+| **Ngày phát hành** | 2026-08-13 |
 | **Khung tham chiếu** | IEEE Std 42010-2011; C4 Model biểu diễn góc nhìn kiến trúc; Architecture Decision Records (ADRs) ghi nhận quyết định kiến trúc. |
 
 ### 1.2. Lịch sử Thay đổi
 | Phiên bản | Ngày | Tác giả | Mô tả Thay đổi |
 | :--- | :--- | :--- | :--- |
 | 1.0 | 2026-08-07 | Senior Software Architect | Phiên bản đầu tiên. |
+| 1.1 | 2026-08-13 | Senior Software Architect | Chuẩn hóa theo PRD v1.2: chuyển đổi phương pháp phân mảnh từ Phân mảnh Ngữ nghĩa sang Phân mảnh theo Đoạn văn (Paragraph Chunking), loại bỏ Matryoshka 768 chiều cho ranh giới câu, và tích hợp bộ lọc ngưỡng tương đồng tối thiểu. |
 
 ---
 
@@ -29,7 +30,7 @@
 Tài liệu này đặc tả thiết kế kiến trúc cho phân hệ **Số hóa & Tra cứu Tri thức Cơ bản (Basic RAG - Retrieval Layer)** thuộc hệ thống VCC-EAP. Tài liệu định nghĩa cách thức tổ chức các thành phần logic, ranh giới dữ liệu và bảo mật phòng ban, cùng cơ chế tích hợp mô hình nhúng cục bộ BGE-M3 phục vụ cho quá trình lập Detailed Design.
 
 ### 2.2. Phạm vi Kiến trúc
-* **Kiến trúc Số hóa**: Trích xuất văn bản thô, phân mảnh văn bản ngữ nghĩa (Semantic Chunking), sinh vector nhúng cho từng mảnh văn bản và lưu trữ các mảnh văn bản kèm vector.
+* **Kiến trúc Số hóa**: Trích xuất văn bản thô, phân mảnh văn bản theo đoạn văn (Paragraph Chunking), sinh vector nhúng cho từng mảnh văn bản và lưu trữ các mảnh văn bản kèm vector.
 * **Kiến trúc Tra cứu (Retrieval Layer)**: Tiếp nhận câu hỏi ngôn ngữ tự nhiên, sinh vector câu hỏi, thực hiện tìm kiếm tương đồng vector và trả về kết quả.
 * **Kiến trúc Phân quyền**: Thực thi Department Isolation, Alias-based Sharing, BOARD Isolation và Soft Delete trực tiếp tại ranh giới cơ sở dữ liệu.
 
@@ -58,7 +59,7 @@ Sơ đồ phân định ranh giới kiến trúc giữa Tuần 3 và Tuần 4:
 ┌─────────────────────────────────────────────────────────────────────────┐
 │ [Document Selected in PROCESSING State]                                 │
 │        ↓                                                                │
-│ Text Extraction -> Semantic-aware Chunking -> Embeddings -> Persist     │
+│ Text Extraction -> Paragraph Chunking -> Embeddings -> Persist          │
 │                                                                  │      │
 │ [State -> COMPLETED / FAILED]                                    │      │
 │                                                                  ▼      │
@@ -259,8 +260,14 @@ Kiến trúc quy định rõ trạng thái tài liệu quyết định tính s�
   $$\vec{v}_{\text{query}} \in \mathbb{R}^{1024} \quad \text{và} \quad \vec{v}_{\text{chunk}} \in \mathbb{R}^{1024}$$
   Quá trình sinh vector nhúng cho mảnh văn bản khi số hóa (Ingestion-time) và cho câu hỏi của người dùng khi truy vấn (Query-time) bắt buộc phải sử dụng chung một phiên bản mô hình nhúng BGE-M3 và chung một không gian vector. Nếu phiên bản mô hình nhúng thay đổi, toàn bộ các vector nhúng hiện tại trong cơ sở dữ liệu phải được tạo lại từ đầu (re-indexed/re-generated).
 * **Khả năng truy vết phiên bản mô hình (Model Version Traceability)**: Phiên bản mô hình nhúng hiện tại được cấu hình tập trung ở cấp độ ứng dụng (`application.yml`). Để tiết kiệm dung lượng lưu trữ, hệ thống không lưu tên và phiên bản mô hình cho từng dòng vector trong cơ sở dữ liệu. Tất cả các vector trong `tbl_chunks` mặc nhiên được coi là thuộc về phiên bản mô hình đang hoạt động; khi thay đổi mô hình, bắt buộc phải chạy tiến trình re-index toàn bộ dữ liệu.
-* **Kiểm soát tài nguyên (Resource Contention)**: Tiến trình sinh vector nhúng chạy in-process chia sẻ tài nguyên CPU và RAM của JVM với các luồng Web API xử lý yêu cầu HTTP. 
-  * *Bất biến kiến trúc*: Tiến trình số hóa nền phải được giới hạn tài nguyên tính toán (resource-bounded) để ngăn ngừa hiện tượng nghẽn luồng hoặc chiếm dụng CPU/RAM quá mức làm suy giảm hiệu năng của luồng tra cứu thời gian thực (interactive retrieval workloads).
+* **Quản lý luồng và kiểm soát tài nguyên (Thread Pooling & Resource Management)**: Tiến trình sinh vector nhúng chạy in-process chia sẻ tài nguyên CPU và RAM của JVM với các luồng Web API xử lý yêu cầu HTTP. Nhằm đảm bảo tính sẵn sàng của hệ thống và tránh làm treo/nghẽn luồng xử lý Web API chính (Tomcat threads), hệ thống đặc tả cấu hình phân bổ tài nguyên và quản lý luồng như sau:
+  * **Cấu hình ONNX Runtime Session (`SessionOptions`)**:
+    * `intra_op_num_threads`: Giới hạn luồng tính toán song song các toán tử (như nhân ma trận) bên trong 1 phiên chạy mô hình. Cấu hình này được giới hạn tối đa bằng **1/2 số nhân CPU vật lý** của máy chủ (ví dụ: tối đa 4 luồng trên máy chủ 8 nhân).
+    * `inter_op_num_threads`: Thiết lập cố định bằng `1` do các mảnh văn bản được nhúng tuần tự trong mỗi tác vụ, tránh phát sinh overhead quản lý luồng không cần thiết.
+    * Đảm bảo ONNX Runtime Session được khởi tạo và quản lý dưới dạng **Singleton Bean** trong Spring Context để tái sử dụng luồng, tránh tạo nhiều session gây bùng nổ số lượng luồng ngoài kiểm soát.
+  * **Cấu hình Spring TaskExecutor cho tác vụ số hóa nền (`asyncDigitizationExecutor`)**:
+    * Sử dụng một `ThreadPoolTaskExecutor` riêng biệt được cấu hình giới hạn kích thước (Bounded Queue Thread Pool) với các tham số mặc định: `corePoolSize = 1`, `maxPoolSize = 2`, `queueCapacity = 1000`. Việc sử dụng Bounded Queue giúp ngăn ngừa nguy cơ OOM do tích lũy quá nhiều tác vụ chờ xử lý trong bộ nhớ JVM Heap.
+    * Đặt độ ưu tiên của các luồng xử lý số hóa nền ở mức thấp nhất (`Thread.MIN_PRIORITY = 1`). Điều này buộc Hệ điều hành (OS Scheduler) ưu tiên thời gian xử lý CPU cho các luồng HTTP của Tomcat phục vụ tra cứu thời gian thực (SLA p95 < 500ms) trước khi phân bổ cho tác vụ xử lý nền.
 * **Đánh giá Bộ nhớ ONNX Runtime**: Bộ nhớ sử dụng bởi mô hình nhúng và ONNX Runtime phải được đánh giá tổng thể ở cấp độ tiến trình hệ điều hành (Process level), bao gồm cả vùng nhớ Heap JVM (JVM Heap) và các vùng nhớ ngoài Heap (native/off-heap memory) được cấp phát bởi ONNX Runtime.
 
 ---
@@ -283,6 +290,7 @@ Quy trình tìm kiếm tương đồng ngữ nghĩa:
              │                         - Cô lập BOARD (BOARD Isolation)
              │                         - Trạng thái tài liệu là COMPLETED
              │                         - Loại trừ tài liệu bị Soft Delete
+             │                         - Bộ lọc ngưỡng tương đồng tối thiểu
              ▼
   [Authorized Candidates]
              │
@@ -296,7 +304,8 @@ Quy trình tìm kiếm tương đồng ngữ nghĩa:
 * **Phép đo Tương đồng (Similarity Metric)**: Sử dụng độ tương đồng Cosine (Cosine Similarity) để so khớp vector câu hỏi và vector mảnh văn bản:
   $$\text{Cosine Similarity} = \frac{\vec{u} \cdot \vec{v}}{\|\vec{u}\| \|\vec{v}\|}$$
 * **HNSW (Hierarchical Navigable Small World)**: Sử dụng chỉ mục HNSW trên cột vector của PostgreSQL (`pgvector`) để tối ưu hiệu năng tìm kiếm láng giềng gần đúng (Approximate Nearest-Neighbor - ANN). Mối quan hệ thực tế giữa việc chọn ứng viên ANN và các điều kiện lọc phân quyền (authorization predicates) phải được đánh giá thông qua đo đạc benchmark thực tế và phân tích kế hoạch thực thi truy vấn (query-plan analysis).
-* **Yêu cầu kết quả (Top-3)**: Cơ sở dữ liệu bắt buộc phải trả về tối đa Top-3 mảnh văn bản có thứ hạng cao nhất và người dùng thực sự có quyền truy cập, sau khi tất cả các mệnh đề lọc phân quyền và lọc trạng thái tài liệu đã được thực thi đồng thời bên trong câu truy vấn cơ sở dữ liệu.
+* **Bộ lọc ngưỡng tương đồng tối thiểu (Similarity Threshold)**: Hệ thống áp dụng một bộ lọc theo ngưỡng điểm tương đồng tối thiểu. Ngưỡng này là một tham số cấu hình động của hệ thống (ví dụ mặc định là 0.60). Bất kỳ kết quả nào có điểm tương đồng nhỏ hơn ngưỡng cấu hình hiện tại sẽ bị hệ thống loại bỏ khỏi danh sách kết quả trả về. Trường hợp sau khi lọc không có đoạn văn bản nào đạt ngưỡng tương đồng hoặc không có tài liệu hợp lệ, hệ thống trả về kết quả trống và hiển thị thông báo thân thiện cho người dùng: *"Không tìm thấy thông tin phù hợp trong kho tài liệu của phòng ban bạn."*
+* **Yêu cầu kết quả (Top-3)**: Cơ sở dữ liệu bắt buộc phải trả về tối đa Top-3 mảnh văn bản có thứ hạng cao nhất và người dùng thực sự có quyền truy cập, sau khi tất cả các mệnh đề lọc phân quyền, lọc ngưỡng tương đồng và lọc trạng thái tài liệu đã được thực thi đồng thời bên trong câu truy vấn cơ sở dữ liệu.
 * **Tối ưu hóa chỉ mục (Iterative Index Scan)**: Kỹ thuật quét chỉ mục lặp (Iterative Index Scan) là phương án tối ưu hóa hiệu năng được cân nhắc để giải quyết trường hợp PostgreSQL chuyển sang quét tuần tự (sequential scan) khi kết hợp các bộ lọc phân quyền phức tạp. Việc áp dụng và hiệu chỉnh kỹ thuật này phải được chứng minh hiệu quả qua benchmark thực tế, không phải là một bất biến kiến trúc bắt buộc.
 
 ---
@@ -312,8 +321,7 @@ Chính sách bảo mật (phòng ban, Alias, BOARD, Soft Delete) thuộc tầng 
 * **Cô lập phòng ban (Department Isolation)**: Người dùng thuộc phòng ban $D_A$ chỉ được phép tìm kiếm và xem các mảnh văn bản thuộc tài liệu do phòng ban $D_A$ sở hữu, hoặc tài liệu của phòng ban khác được chia sẻ hợp lệ cho $D_A$ qua liên kết Alias.
 * **Liên kết chia sẻ (Alias Sharing)**:
   * Cho phép chia sẻ tài liệu giữa phòng ban sở hữu sang phòng ban nhận dưới dạng liên kết logic Alias.
-  * Quyền truy cập qua Alias chỉ có hiệu lực khi trạng thái Alias là hoạt động (`active`) và chưa bị xóa logic. Trạng thái này được đánh giá trực tiếp tại thời điểm thực hiện truy vấn tìm kiếm (runtime evaluation). Không lưu cấu hình quyền truy cập dạng cache tĩnh làm chậm trễ hiệu lực của việc thu hồi Alias.
-  * Khi hiển thị kết quả tìm kiếm thông qua Alias, hệ thống bắt buộc phải hiển thị tiêu đề hiển thị thiết lập trên Alias thay vì tiêu đề gốc của tài liệu để tuân thủ quy tắc bảo mật nghiệp vụ.
+  * Quyền truy cập qua Alias chỉ có hiệu lực khi tài liệu gốc tương ứng chưa bị đánh dấu xóa logic (Soft Delete). Khi tài liệu gốc bị xóa logic, các liên kết chia sẻ Alias liên quan cũng lập tức mất hiệu lực.
 * **Cô lập tuyệt đối của BOARD (BOARD Isolation)**:
   * Tài liệu thuộc phòng ban BOARD chỉ cho phép người dùng thuộc BOARD truy xuất.
   * Hệ thống cấm tạo liên kết chia sẻ (Alias) đối với tài liệu của BOARD ra các phòng ban bên ngoài, đồng thời BOARD cũng không nhận chia sẻ Alias từ phòng ban khác. Không có bất kỳ cơ chế Alias nào được phép bypass quy tắc cô lập của BOARD.
@@ -328,15 +336,15 @@ Chính sách bảo mật (phòng ban, Alias, BOARD, Soft Delete) thuộc tầng 
 ## 10. Chiến lược Phân mảnh & Tách biệt Lưu trữ
 
 ### 10.1. Chiến lược Phân mảnh (Document Chunking)
-Hệ thống sử dụng giải pháp **Phân mảnh Ngữ nghĩa Cửa sổ trượt cải tiến (Improved 768-dim Sliding Window Semantic Chunking)**.
+Hệ thống sử dụng giải pháp **Phân mảnh theo Đoạn văn (Paragraph Chunking)**.
 * **Nguyên lý hoạt động**:
-  * **Cửa sổ trượt kép**: Sử dụng hai cửa sổ ngữ cảnh (trái và phải) cỡ $K=3$ trượt dọc theo ranh giới giữa các câu để đánh giá độ chuyển dịch ngữ nghĩa.
-  * **Hệ số suy giảm (Decay Weights)**: Áp dụng các trọng số giảm dần $W = [0.5, 0.3, 0.2]$ cho các câu tương ứng từ sát ranh giới lùi ra xa, giúp tăng độ nhạy và tính chính xác của ranh giới ngữ nghĩa.
-  * **Cắt lát Matryoshka (768-dim)**: Trích xuất 768 chiều đầu tiên (từ vector nhúng 1024 chiều gốc của mô hình BGE-M3) để tính toán tương đồng ngữ cảnh trong bộ nhớ đệm. Việc này giúp tiết kiệm CPU và RAM trong quá trình phân đoạn.
-  * **Neo cấu trúc cưỡng bức (Forced Split)**: Tự động ngắt đoạn cứng tại các vị trí đánh dấu cấu trúc tự nhiên (Chương, Điều, Mục, Hỏi/Đáp) để bảo vệ tính toàn vẹn của khối nghiệp vụ.
-  * **Gối đầu thông minh (Overlap) và Khóa chặn**: Áp dụng gối đầu $O$ câu đối với phân đoạn tự do. Đối với ngắt do neo cấu trúc, thiết lập $O = 0$ để tránh rò rỉ ngữ cảnh chéo.
-  * **Chuẩn hóa L2**: Mọi vector cửa sổ trượt trước khi tính tương đồng, cũng như vector chunk thành phẩm sau khi chạy Mean Pooling từ các câu thành phần, đều phải được chuẩn hóa L2 để đảm bảo tính đúng đắn của phép đo Cosine.
-* *Ranh giới Thiết kế*: Thiết kế kiến trúc chỉ định nghĩa nguyên lý toán học và ranh giới hoạt động của thuật toán. Việc hiện thực hóa cấu trúc lớp, thuật toán xử lý biên động và mã nguồn Java cụ thể được mô tả chi tiết tại tài liệu Thiết kế Chi tiết (DDD).
+  * **Phân tách tự nhiên**: Tách văn bản thô dựa trên các ký tự ngắt đoạn tự nhiên (mặc định là dấu xuống dòng kép `\n\n`).
+  * **Giới hạn kích thước tối đa (Max Tokens)**: Mỗi mảnh được giới hạn kích thước tối đa là $T_{\max}$ tokens (cấu hình động, mặc định là 1000 tokens). Nếu một đoạn văn tự nhiên $\le T_{\max}$ tokens, nó được lưu thành 1 chunk duy nhất.
+  * **Cắt cứng tại ranh giới câu (Hard Split)**: Nếu đoạn văn tự nhiên dài vượt quá $T_{\max}$ tokens, thực hiện cắt đoạn văn tại ranh giới câu gần nhất (dựa trên dấu câu `.`, `?`, `!`) để tạo thành các chunk nhỏ hơn nằm trong giới hạn. Không sử dụng tính toán vector tương đồng giữa các câu và không áp dụng cơ chế overlap (gối đầu) giữa các chunk.
+  * **Tránh phân mảnh vụn (Min Chunk Size constraint)**: Khi cắt cứng, nếu phần dư còn lại sau khi cắt có kích thước nhỏ hơn giới hạn tối thiểu $T_{\min}$ tokens (cấu hình động, mặc định là 100 tokens), hệ thống sẽ gộp phần dư này vào chunk liền trước (chấp nhận kích thước chunk liền trước vượt quá $T_{\max}$ một chút nhưng không vượt quá giới hạn tràn tối đa $T_{\text{overflow\_max}}$ cấu hình, ví dụ mặc định là 1100 tokens) hoặc phân bổ lại điểm cắt tại các ranh giới câu gần đó sao cho độ dài các chunk được phân chia tương đối cân bằng.
+  * **Tính lũy đẳng (Idempotency)**: Đảm bảo quy trình số hóa và lưu trữ chunk là idempotent. Khi số hóa lại hoặc tiếp tục tiến trình bị gián đoạn, các chunk mới phải ghi đè hoặc cập nhật chính xác lên các chunk cũ đã có của tài liệu đó để tránh trùng lặp dữ liệu.
+  * **Tham số cấu hình động**: Các tham số phân mảnh (giới hạn tối đa, giới hạn tối thiểu, ký tự phân tách đoạn) được thiết kế dưới dạng cấu hình hệ thống để có thể tinh chỉnh linh hoạt tại runtime mà không cần khởi động lại ứng dụng.
+* *Ranh giới Thiết kế*: Thiết kế kiến trúc chỉ định nghĩa nguyên lý toán học và ranh giới hoạt động của thuật toán. Việc hiện thực hóa cấu trúc lớp, các cơ chế đếm token và mã nguồn Java cụ thể được mô tả chi tiết tại tài liệu Thiết kế Chi tiết (DDD).
 
 ### 10.2. Tách biệt Hạ tầng Lưu trữ (Storage Separation)
 * **Kho Lưu trữ Tệp tin (File Storage)**: Lưu trữ vật lý các tệp tài liệu gốc nguyên bản (PDF, Word, Excel). Các thuộc tính như cấu trúc thư mục, thuật toán đặt tên tệp, ghi tệp nguyên tử nằm ngoài phạm vi tài liệu này.
@@ -351,12 +359,12 @@ Hệ thống bắt buộc phải duy trì và tuân thủ các bất biến ki�
 1. **Trạng thái sẵn sàng tra cứu**: Chỉ các mảnh văn bản thuộc tài liệu có trạng thái `COMPLETED` mới được tham gia vào quá trình tìm kiếm tương đồng vector.
 2. **Không lọc quyền trên JVM (No JVM Post-filtering)**: Các mảnh văn bản không hợp lệ về quyền truy cập tuyệt đối không được nạp vào bộ nhớ JVM từ cơ sở dữ liệu để thực hiện lọc quyền bằng mã ứng dụng.
 3. **Lọc quyền tại DB (Database-level Filtering)**: Bộ lọc cô lập phòng ban (Department Isolation) bắt buộc phải được thực thi trực tiếp trong câu lệnh truy vấn tìm kiếm tương đồng vector ở tầng lưu trữ.
-4. **Hiệu lực tức thì của Alias**: Quyền truy cập thông qua Alias được đánh giá tại thời điểm chạy dựa trên trạng thái hoạt động thực tế của Alias (chưa bị xóa).
+4. **Hiệu lực của Alias phụ thuộc tài liệu gốc**: Quyền truy cập thông qua Alias lập tức mất hiệu lực khi tài liệu gốc bị đánh dấu xóa logic (Soft Delete).
 5. **Tính cô lập của BOARD**: Sự cô lập tài liệu của BOARD là tuyệt đối và không thể bị bypass bởi bất kỳ cơ chế chia sẻ Alias nào.
 6. **Giới hạn quyền của SYSTEM_ADMIN**: Tài khoản `SYSTEM_ADMIN` bị từ chối truy cập nội dung tài liệu và mảnh văn bản trên mọi giao diện và đường dẫn API của ứng dụng.
 7. **Đồng nhất Không gian Vector**: Quy trình nhúng khi số hóa (Ingestion-time) và nhúng khi truy vấn (Query-time) bắt buộc sử dụng chung một phiên bản mô hình nhúng BGE-M3 và cùng không gian vector 1024 chiều.
 8. **Khả năng truy vết mô hình**: Phiên bản mô hình nhúng được quản lý tập trung ở cấu hình hệ thống (application.yml). Toàn bộ vector trong cơ sở dữ liệu mặc nhiên thuộc về không gian vector của phiên bản mô hình này; khi thay đổi mô hình, hệ thống bắt buộc phải thực hiện re-index toàn bộ để đảm bảo đồng nhất không gian vector.
-9. **Giới hạn tài nguyên số hóa nền (Resource Bounding)**: Các tác vụ số hóa nền bắt buộc phải được giới hạn tài nguyên tính toán để không chiếm quyền xử lý hoặc gây nghẽn luồng truy xuất thời gian thực của người dùng. Đối với tài liệu lớn, hệ thống áp dụng cơ chế đọc cuốn chiếu (Block size = 20 trang) và Batch Inference tối đa 128 câu mỗi đợt. Đồng thời, giới hạn số luồng tính toán song song CPU của ONNX Runtime session tối đa bằng 1/2 số nhân CPU thực tế (4 luồng trên máy chủ 8 nhân) để duy trì hiệu năng xử lý REST API.
+9. **Giới hạn tài nguyên số hóa nền và quản lý luồng (Resource Bounding & Thread Management)**: Các tác vụ số hóa nền bắt buộc phải được giới hạn tài nguyên tính toán để không chiếm quyền xử lý hoặc gây nghẽn luồng truy xuất thời gian thực của người dùng. Cụ thể: áp dụng cơ chế xử lý cuốn chiếu (Incremental Chunk Processing), Batch Inference tối đa 128 chunks mỗi đợt, giới hạn số luồng tính toán song song CPU của ONNX Runtime session tối đa bằng 1/2 số nhân CPU thực tế (`intra_op_num_threads`), cố định `inter_op_num_threads = 1`, chạy tác vụ nền trên Thread Pool riêng biệt (`corePoolSize = 1`, `maxPoolSize = 2`, Bounded Queue capacity = 1000) và hạ độ ưu tiên luồng xuống mức thấp nhất (`Thread.MIN_PRIORITY = 1`) để ưu tiên hiệu năng xử lý REST API.
 10. **Không định nghĩa lại hạ tầng Tuần 3**: Kiến trúc Tuần 4 không thiết kế lại hoặc sao chép cơ sở hạ tầng upload tệp, scanner quét tệp, hàng đợi tác vụ và cơ chế tự phục hồi tác vụ sau crash của Tuần 3.
 11. **Lỗi Chunk độc lập (Isolated Chunk Failure)**: Sự thất bại của một mảnh văn bản riêng lẻ sau khi cạn kiệt 3 lần retry bắt buộc không được làm dừng hay hủy bỏ toàn bộ đường ống số hóa tài liệu. Mảnh lỗi sẽ bị skip, ghi nhận thông tin và đường ống tiếp tục xử lý mảnh kế tiếp. Mảnh bị skip không có vector nhúng và không tham gia tra cứu.
 
@@ -366,19 +374,20 @@ Hệ thống bắt buộc phải duy trì và tuân thủ các bất biến ki�
 
 ### 12.1. ADR-004-1: Chiến lược Phân mảnh Tài liệu
 * **Trạng thái**: Đã phê duyệt.
-* **Bối cảnh**: Văn bản trích xuất từ tài liệu gốc cần được chia tách thành các mảnh nhỏ để phù hợp với giới hạn ngữ cảnh đầu vào (context window) của mô hình BGE-M3 và tối ưu hóa mật độ thông tin ngữ nghĩa.
-* **Quyết định**: Sử dụng giải pháp **Phân mảnh Ngữ nghĩa Cửa sổ trượt cải tiến (Improved 768-dim Sliding Window Semantic Chunking)**:
-  * **Neo cấu trúc cưỡng bức (Forced Split)**: Ưu tiên ngắt phân đoạn tại ranh giới các cấu trúc tự nhiên (Chương, Điều, Mục, Hỏi/Đáp) qua quét mẫu Regex tối giản trước khi tính khoảng cách ngữ nghĩa để bảo toàn khối nghiệp vụ.
-  * **Cửa sổ trượt ngữ cảnh (K=3)**: Sử dụng các trọng số decay `[0.5, 0.3, 0.2]` và trích xuất **768 chiều đầu tiên (Matryoshka Truncation)** từ vector 1024-dim gốc để tính toán tương đồng ngữ cảnh in-memory.
-  * **Gối đầu và Khóa chặn**: Áp dụng gối đầu $O$ câu đối với phân đoạn tự do, và đặt $O = 0$ đối với ngắt do neo cấu trúc.
-  * **Chuẩn hóa L2**: Bắt buộc thực hiện chuẩn hóa L2 cho các vector cửa sổ và vector chunk sau Mean Pooling trước khi tính tương đồng hoặc lưu trữ.
+* **Bối cảnh**: Văn bản trích xuất từ tài liệu gốc cần được chia tách thành các mảnh nhỏ để phù hợp với giới hạn ngữ cảnh đầu vào (context window) của mô hình BGE-M3, tối ưu hóa mật độ thông tin ngữ nghĩa và tránh tạo ra các mảnh quá vụn.
+* **Quyết định**: Sử dụng giải pháp **Phân mảnh theo Đoạn văn kết hợp xử lý tránh phân mảnh vụn (Paragraph Chunking with Min Chunk Size constraint)**:
+  * **Phân mảnh theo đoạn văn**: Chia nhỏ văn bản gốc thành các phân đoạn (chunk) dựa trên dấu ngắt đoạn tự nhiên (xuống dòng kép `\n\n`).
+  * **Cắt cứng tại câu (Hard Split)**: Nếu đoạn văn dài vượt quá giới hạn tối đa (1000 tokens), hệ thống thực hiện cắt cứng tại ranh giới câu mà không cần tính toán tương đồng ngữ nghĩa hay cơ chế overlap (gối đầu).
+  * **Tránh phân mảnh vụn**: Nếu phần dư sau khi cắt có kích thước nhỏ hơn giới hạn tối thiểu (100 tokens), hệ thống gộp phần dư này vào chunk liền trước (chấp nhận kích thước chunk liền trước vượt quá giới hạn tối đa một chút nhưng không vượt quá giới hạn tràn tối đa cấu hình, ví dụ mặc định là 1100 tokens) hoặc phân bổ lại điểm cắt tại các ranh giới câu gần đó.
+  * **Tính lũy đẳng**: Đảm bảo quy trình số hóa và lưu trữ chunk ghi đè hoặc cập nhật chính xác lên các chunk cũ đã có của tài liệu đó khi số hóa lại.
 * **Các phương án thay thế**:
+   * *Phân mảnh Ngữ nghĩa Cửa sổ trượt cải tiến*: Gom nhóm các câu dựa trên tính liên mạch ý nghĩa sử dụng tương đồng cosine cửa sổ trượt. Phương án này tuy tối ưu về mặt lý thuyết nhưng quá phức tạp, tiêu tốn nhiều tài nguyên CPU/RAM để tính toán khoảng cách vector câu in-memory, dễ gây lỗi tràn bộ nhớ khi chạy in-process và tạo ra các phân đoạn quá nhỏ (phân mảnh vụn) nếu cấu trúc văn bản rời rạc.
    * *Fixed-size Chunking (Phân mảnh kích thước cố định)*: Cắt chuỗi theo số ký tự cố định. Đơn giản nhưng dễ cắt đôi câu ở ranh giới mảnh, làm mất ý nghĩa ngữ cảnh tiếng Việt.
-   * *Paragraph-based Chunking (Phân mảnh theo đoạn)*: Chia mảnh theo ký tự xuống dòng `\n`. Phụ thuộc lớn vào định dạng tài liệu đầu vào, dễ tạo ra các mảnh quá dài hoặc quá ngắn không đồng đều.
 * **Hệ quả**:
-   * Cải thiện chất lượng tìm kiếm RAG (Hit Rate @ Top-3 > 95%) nhờ bảo toàn trọn vẹn ngữ nghĩa và các ranh giới nghiệp vụ tự nhiên.
-   * Giảm thiểu tối đa chi phí CPU/RAM nhờ giảm chiều tính toán từ 1024 xuống 768 và gom Batch Inference toàn bộ câu trong tài liệu qua 1 lần gọi duy nhất xuống ONNX Runtime.
-   * Đảm bảo tính bảo mật và cách ly thông tin, tránh hiện tượng gối đầu chéo qua các ranh giới neo cấu trúc cứng.
+   * Đơn giản hóa quy trình số hóa, loại bỏ hoàn toàn việc tính toán tương đồng ngữ cảnh giữa các câu riêng lẻ in-memory, từ đó loại bỏ nguy cơ quá tải CPU/RAM cho JVM.
+   * Tránh hiện tượng phân mảnh vụn thông qua cơ chế ràng buộc kích thước tối thiểu.
+   * Đảm bảo tính lũy đẳng (idempotency) của dữ liệu lưu trữ khi số hóa lại.
+   * Tăng khả năng cấu hình linh hoạt của hệ thống tại runtime.
 
 ### 12.2. ADR-004-2: Bộ máy Lưu trữ Vector & Phép đo tương đồng
 * **Trạng thái**: Đã phê duyệt.
@@ -392,11 +401,11 @@ Hệ thống bắt buộc phải duy trì và tuân thủ các bất biến ki�
 ### 12.3. ADR-004-3: Bộ máy Sinh Vector Nhúng Cục bộ
 * **Trạng thái**: Đã phê duyệt.
 * **Bối cảnh**: Hệ thống yêu cầu bảo mật thông tin nội bộ nghiêm ngặt, không được gửi dữ liệu văn bản ra API bên ngoài mạng và cần giảm thiểu chi phí tích hợp.
-* **Quyết định**: Sử dụng mô hình nhúng cục bộ **BGE-M3** chạy in-process trực tiếp trong JVM thông qua thư viện ONNX Runtime. Thiết lập tối ưu hóa rút ngắn chiều vector nhúng Matryoshka: trích xuất **768 chiều đầu tiên** để so sánh khoảng cách ranh giới câu tạm thời nhằm tiết kiệm 25% CPU và 75% RAM tạm, trong khi vẫn sinh và lưu trữ đầy đủ vector **1024 chiều gốc** của các chunk thành phẩm phục vụ tra cứu RAG.
+* **Quyết định**: Sử dụng mô hình nhúng cục bộ **BGE-M3** chạy in-process trực tiếp trong JVM thông qua thư viện ONNX Runtime. ONNX Runtime thực hiện sinh vector nhúng trực tiếp cho các chunk thành phẩm theo số chiều cấu hình của mô hình nhúng cục bộ (mặc định 1024 chiều đối với BGE-M3). Hệ thống áp dụng kiểm tra tính hợp lệ của vector nhúng được tạo ra (như số chiều vector tương thích với cấu hình).
 * **Các phương án thay thế**:
    * *Sử dụng API nhúng thương mại bên ngoài (OpenAI, Cohere)*: Vật lý bảo mật (gửi thông tin nhạy cảm của doanh nghiệp ra ngoài) và phụ thuộc mạng ngoài làm tăng độ trễ phản hồi.
    * *Mô hình nhúng cỡ nhỏ chạy cục bộ (all-MiniLM-L6-v2)*: Kích thước mô hình nhẹ, nhưng khả năng hiểu ngữ nghĩa tiếng Việt kém, ảnh hưởng trực tiếp đến chất lượng tìm kiếm.
-* **Hệ quả**: Đảm bảo an toàn thông tin vì không truyền văn bản ra ngoài doanh nghiệp. Vector 768-dim mang lại độ chính xác ngữ nghĩa tương đương 99% so với vector 1024-dim gốc nhưng tối ưu hóa đáng kể tốc độ nhân chập trên JVM. Cần cấu hình JVM Heap thích hợp (-Xmx4g cho RAM 8GB) để chạy ổn định.
+* **Hệ quả**: Đảm bảo an toàn thông tin vì không truyền văn bản ra ngoài doanh nghiệp. Mô hình nhúng BGE-M3 chạy in-process đáp ứng đầy đủ yêu cầu về bảo mật dữ liệu doanh nghiệp và độ chính xác ngữ nghĩa. Cần cấu hình JVM Heap thích hợp (-Xmx4g cho RAM 8GB) để chạy ổn định.
 
 ### 12.4. ADR-004-4: Lọc Phân quyền tại Tầng Repository
 * **Trạng thái**: Đã phê duyệt.
@@ -444,20 +453,23 @@ Hệ thống bắt buộc phải duy trì và tuân thủ các bất biến ki�
 * **Phương pháp**: Thiết lập các kịch bản kiểm thử tích hợp tự động (Integration Tests) kiểm chứng ma trận phân quyền truy xuất dữ liệu ngữ nghĩa.
 * **Ma trận kiểm thử tích hợp**:
 
-| Vai trò người dùng | Phòng ban sở hữu tài liệu | Trạng thái Alias | Trạng thái tài liệu | Kết quả mong muốn (Tìm kiếm ngữ nghĩa) |
-| :--- | :--- | :--- | :--- | :--- |
-| Employee ($D_A$) | $D_A$ | N/A | COMPLETED | **ALLOW**: Tìm thấy mảnh văn bản tương đồng. |
-| Employee ($D_A$) | $D_B$ | N/A | COMPLETED | **DENY**: Không tìm thấy mảnh văn bản của $D_B$. |
-| Employee ($D_A$) | $D_B$ | `active` (chưa bị xóa) | COMPLETED | **ALLOW**: Tìm thấy mảnh văn bản, tiêu đề hiển thị khớp với tiêu đề Alias. |
-| Employee ($D_A$) | $D_B$ | `revoked` (đã bị xóa/thu hồi) | COMPLETED | **DENY**: Không tìm thấy mảnh văn bản của $D_B$ (Alias bị thu hồi). |
-| Employee ($D_A$) | BOARD | N/A | COMPLETED | **DENY**: Không tìm thấy tài liệu BOARD. |
-| Employee ($D_A$) | BOARD | `active` (cố gắng tạo) | COMPLETED | **DENY / ERROR**: Hệ thống ngăn chặn tạo Alias cho tài liệu BOARD. |
-| BOARD User | BOARD | N/A | COMPLETED | **ALLOW**: Tìm thấy mảnh văn bản tài liệu BOARD. |
-| SYSTEM_ADMIN | Bất kỳ phòng ban nào | N/A | COMPLETED | **DENY**: Trả về 403 Forbidden trên mọi kênh truy cập. |
-| Employee ($D_A$) | $D_A$ | N/A | Soft Deleted | **DENY**: Loại trừ hoàn toàn khỏi kết quả tìm kiếm. |
-| Employee ($D_A$) | $D_A$ | N/A | PROCESSING / FAILED | **DENY**: Không tham gia truy xuất ngữ nghĩa. |
+| Vai trò người dùng | Phòng ban sở hữu tài liệu | Trạng thái tài liệu | Kết quả mong muốn (Tìm kiếm ngữ nghĩa) |
+| :--- | :--- | :--- | :--- |
+| Employee ($D_A$) | $D_A$ | COMPLETED | **ALLOW**: Tìm thấy mảnh văn bản tương đồng. |
+| Employee ($D_A$) | $D_B$ (chưa có Alias) | COMPLETED | **DENY**: Không tìm thấy mảnh văn bản của $D_B$. |
+| Employee ($D_A$) | $D_B$ (đã có Alias) | COMPLETED | **ALLOW**: Tìm thấy mảnh văn bản tương đồng qua Alias. |
+| Employee ($D_A$) | BOARD | COMPLETED | **DENY**: Không tìm thấy tài liệu BOARD. |
+| Employee ($D_A$) | BOARD (cố tạo Alias) | COMPLETED | **DENY / ERROR**: Hệ thống ngăn chặn tạo Alias cho tài liệu BOARD. |
+| BOARD User | BOARD | COMPLETED | **ALLOW**: Tìm thấy mảnh văn bản tài liệu BOARD. |
+| SYSTEM_ADMIN | Bất kỳ phòng ban nào | COMPLETED | **DENY**: Trả về 403 Forbidden trên mọi kênh truy cập. |
+| Employee ($D_A$) | $D_A$ | Soft Deleted | **DENY**: Loại trừ hoàn toàn khỏi kết quả tìm kiếm (kéo theo Alias bị ẩn). |
+| Employee ($D_A$) | $D_A$ | PROCESSING / FAILED | **DENY**: Không tham gia truy xuất ngữ nghĩa. |
 
 ### 14.3. Xác thực Chất lượng Tìm kiếm (Retrieval Quality Verification)
 * **Phương pháp**: Đo lường độ chính xác dựa trên tập câu hỏi kiểm nghiệm mẫu (Ground Truth).
-* **Kịch bản**: Chuẩn bị một tập Ground Truth gồm **50 câu hỏi nghiệp vụ thực tế** khác nhau, mỗi câu hỏi được định sẵn một hoặc nhiều đoạn văn bản liên quan hợp lệ nằm trong tập tài liệu đã được số hóa.
-* **Chỉ số kiểm chứng**: Thực hiện truy vấn 50 câu hỏi và tính toán chỉ số **Hit Rate @ Top-3** (tỷ lệ câu hỏi mà kết quả trả về Top-3 của hệ thống chứa ít nhất một đoạn văn bản liên quan hợp lệ). Mục tiêu nghiệm thu đạt **Hit Rate @ Top-3 >= 90%** trên tập dữ liệu ban đầu này.
+* **Kịch bản**: 
+  * Chuẩn bị một tập Ground Truth gồm **50 câu hỏi nghiệp vụ thực tế** khác nhau, mỗi câu hỏi được định sẵn một hoặc nhiều đoạn văn bản liên quan hợp lệ nằm trong tập tài liệu đã được số hóa.
+  * Thực hiện kiểm thử và đo lường độ chính xác với việc áp dụng các cấu hình ngưỡng tương đồng tối thiểu khác nhau (mặc định 0.60).
+* **Chỉ số kiểm chứng**: 
+  * Thực hiện truy vấn 50 câu hỏi và tính toán chỉ số **Hit Rate @ Top-3** (tỷ lệ câu hỏi mà kết quả trả về Top-3 của hệ thống chứa ít nhất một đoạn văn bản liên quan hợp lệ). Mục tiêu nghiệm thu đạt **Hit Rate @ Top-3 >= 90%** trên tập dữ liệu ban đầu này.
+  * Đảm bảo các kết quả có điểm tương đồng dưới 0.60 bị loại bỏ, và nếu không tìm thấy gì, trả về thông báo thân thiện quy định trong PRD.

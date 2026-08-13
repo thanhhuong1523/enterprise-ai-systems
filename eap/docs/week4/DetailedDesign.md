@@ -1,5 +1,5 @@
 # TÀI LIỆU THIẾT KẾ CHI TIẾT (DETAILED DESIGN DOCUMENT - DDD)
-**Số hóa & Tra cứu Tri thức Cơ bản (Basic RAG - Retrieval Layer) (Tuần 4 - Phiên bản 1.0)**
+**Số hóa & Tra cứu Tri thức Cơ bản (Basic RAG - Retrieval Layer) (Tuần 4 - Phiên bản 1.1)**
 
 ---
 
@@ -20,9 +20,9 @@
 | Thuộc tính | Chi tiết tài liệu |
 | :--- | :--- |
 | **Mã tài liệu (Document ID)** | DD-EAP-W4-001 |
-| **Phiên bản (Version)** | 1.0 |
+| **Phiên bản (Version)** | 1.1 |
 | **Trạng thái (Status)** | Sẵn sàng phê duyệt |
-| **Ngày phát hành (Date)** | 2026-08-07 |
+| **Ngày phát hành (Date)** | 2026-08-13 |
 | **Tác giả (Author)** | Nhóm Phát triển Backend (Senior Software Engineer) |
 | **Tài liệu Kiến trúc liên quan** | [ADD-004](file:///Users/phantom/Downloads/Intern/project/eap/docs/week4/architecture_design.md) |
 | **Mục đích & Phạm vi (Purpose & Scope)** | Tài liệu đặc tả thiết kế chi tiết cấp thấp phục vụ lập trình cho phân hệ **Số hóa & Tra cứu Tri thức Cơ bản (Basic RAG - Retrieval Layer)** của dự án VCC-EAP. Thiết kế tuân thủ các chỉ định và quyết định kiến trúc tại tài liệu ADD-004. Phạm vi thiết kế bao gồm cấu trúc lớp, sơ đồ tuần tự thực thi, cấu trúc cơ sở dữ liệu và kịch bản Flyway migration. |
@@ -31,6 +31,7 @@
 | Phiên bản | Ngày | Tác giả | Mô tả Thay đổi / Ghi chú |
 | :--- | :--- | :--- | :--- |
 | 1.0 | 2026-08-07 | Nhóm Phát triển | Phiên bản đầu tiên. Đặc tả thiết kế chi tiết cho phân hệ Số hóa & Tra cứu. |
+| 1.1 | 2026-08-13 | Nhóm Phát triển | Chuẩn hóa theo thiết kế kiến trúc mới (ADD v1.1) và PRD v1.2: chuyển đổi phương pháp phân mảnh từ Phân mảnh Ngữ nghĩa sang Phân mảnh theo Đoạn văn (Paragraph Chunking), loại bỏ Matryoshka 768 chiều cho ranh giới câu, và tích hợp bộ lọc ngưỡng tương đồng tối thiểu. Đồng thời chuyển truy vấn SQL sang Named Parameters, tham số hóa BOARD ID (`:boardDeptId`), và hiển thị tiêu đề tài liệu gốc (`d.title`) chéo phòng ban qua Alias theo đúng PRD TC-4.3. |
 
 ---
 
@@ -92,11 +93,11 @@ graph TD
 *   **`TextExtractionService`**:
     *   Trách nhiệm: Đọc tệp vật lý gốc (PDF, DOCX, XLSX) thông qua `file_reference` và trích xuất chuỗi văn bản thô tiếng Việt (UTF-8). Tích hợp với `pdfbox`, `poi` và `tika` đã khai báo trong `pom.xml`.
 *   **`ChunkingService`**:
-    *   Trách nhiệm: Thực hiện phân mảnh văn bản ngữ nghĩa (Semantic-aware chunking). Cắt văn bản thô thành danh sách các câu nghiệp vụ tiếng Việt, tính toán tương đồng ngữ nghĩa bằng `EmbeddingService`, sau đó ghép các câu có ngữ cảnh gần nhau thành mảnh (chunk) văn bản hoàn chỉnh dựa trên cấu hình runtime (kích thước tối đa, ngưỡng tương đồng).
+    *   Trách nhiệm: Thực hiện phân mảnh văn bản theo đoạn văn (Paragraph Chunking). Tách văn bản thô dựa trên dấu ngắt đoạn tự nhiên (mặc định là `\n\n`), cắt cứng các đoạn văn bản dài vượt quá giới hạn tối đa tại các ranh giới câu, và áp dụng ràng buộc kích thước tối thiểu để gộp các mảnh dư thừa vào mảnh liền trước nhằm tránh phân mảnh vụn.
 *   **`EmbeddingService`**:
     *   Trách nhiệm: Tải mô hình nhúng cục bộ BGE-M3 (ONNX) và sinh vector nhúng 1024 chiều cho chuỗi văn bản (in-process). Quản lý khởi tạo Singleton và cấu hình song song của ONNX Runtime session. Thực hiện kiểm chứng đầu ra luôn đạt 1024 chiều và L2-Normalize.
 *   **`ChunkPersistenceService`**:
-    *   Trách nhiệm: Lưu trữ bền vững từng mảnh văn bản nghiệp vụ, chỉ mục thứ tự (`chunk_index`), vector nhúng và siêu dữ liệu phiên bản mô hình vào cơ sở dữ liệu. Để đảm bảo cô lập lỗi ở cấp độ chunk, phương thức lưu trữ của lớp này được đánh dấu `@Transactional(propagation = Propagation.REQUIRES_NEW)`.
+    *   Trách nhiệm: Lưu trữ bền vững theo lô (Batch Database Persistence) các mảnh văn bản nghiệp vụ, chỉ mục thứ tự (`chunk_index`), vector nhúng và siêu dữ liệu phiên bản mô hình vào cơ sở dữ liệu để tránh nghẽn kết nối và overhead mạng. Nếu việc ghi theo lô bị lỗi, hệ thống kích hoạt cơ chế fallback lưu từng chunk đơn lẻ để có thể bỏ qua (skip) các chunk bị lỗi nghiệp vụ cụ thể. Để đảm bảo cô lập lỗi ở cấp độ lô/chunk, phương thức lưu trữ của lớp này được đánh dấu `@Transactional(propagation = Propagation.REQUIRES_NEW)`.
 *   **`RetrievalService`**:
     *   Trách nhiệm: Điều phối tiến trình tìm kiếm ngữ nghĩa. Nhận câu hỏi, gọi `EmbeddingService` sinh vector truy vấn, lấy dữ liệu phân quyền phòng ban của người dùng hiện tại từ `EapAuthorizationContext` và chuyển giao thông tin xuống `ChunkRepository` để thực thi truy vấn cơ sở dữ liệu.
 
@@ -128,24 +129,26 @@ sequenceDiagram
     TE-->>DS: String (Raw UTF-8 Text)
     deactivate TE
     
-    DS->>CS: splitDocument(rawText, docTitle)
+    DS->>CS: splitDocument(rawText)
     activate CS
-    
-    CS->>ES: embedBatchWithTokenCounts(sentences)
-    activate ES
-    Note over ES: Gom toàn bộ câu của tài liệu<br/>gửi 1 cuộc gọi JNI xuống ONNX Runtime
-    ES-->>CS: EmbeddingBatchResult (vectors & tokenCounts)
-    deactivate ES
-    
-    Note over CS: Thực hiện phân mảnh cửa sổ trượt 768-dim,<br/>neo cấu trúc, Mean Pooling & L2-Normalize chunk
-    
-    CS-->>DS: List<Chunk> (Mỗi Chunk chứa content & vector 1024-dim)
+    Note over CS: Phân mảnh theo đoạn văn (\n\n),<br/>cắt câu khi vượt max-tokens,<br/>gộp phần dư khi dưới min-tokens.
+    CS-->>DS: List<String> (Danh sách nội dung các mảnh văn bản)
     deactivate CS
 
-    Note over DS: Cập nhật total_chunks = List.size() và last_completed_chunk = 0 vào DB
+    Note over DS: Chia danh sách mảnh thành các lô (batch) tối đa 128 chunks
+    
+    loop Cho mỗi lô chunks
+        DS->>ES: embedBatch(batchChunks)
+        activate ES
+        Note over ES: Gọi ONNX Runtime in-process sinh vector 1024-dim<br/>và thực hiện chuẩn hóa L2
+        ES-->>DS: List<float[]> (Danh sách vector nhúng)
+        deactivate ES
+    end
+
+    Note over DS: Cập nhật total_chunks và last_completed_chunk = 0 vào DB
     
     loop Cho mỗi chunk từ k = lastCompleted + 1 đến totalChunks
-        DS->>PS: persistChunk(docId, k, chunk.content, chunk.embedding)
+        DS->>PS: persistChunk(docId, k, content, embedding)
         activate PS
         Note over PS: Thực thi trong REQUIRES_NEW transaction<br/>Thử lại tối đa 3 lần nếu lỗi DB
         PS->>R: insert chunk & update checkpoint
@@ -364,44 +367,32 @@ WHERE parent_id IS NOT NULL AND deleted_at IS NULL;
 ## 4. DETAILED MODULE DESIGN (THIẾT KẾ CHI TIẾT CÁC MODULE)
 
 ### 4.1. Chunker Module & Pseudocode (Thiết kế Phân mảnh & Mã giả)
-Giải thuật phân mảnh ngữ nghĩa sử dụng thuật toán **Phân mảnh Ngữ nghĩa Cửa sổ trượt cải tiến (Improved 768-dim Sliding Window Semantic Chunking)** được triển khai qua `ChunkingService`:
+Giải thuật phân mảnh văn bản sử dụng giải pháp **Phân mảnh theo Đoạn văn kết hợp xử lý tránh phân mảnh vụn (Paragraph Chunking with Min Chunk Size constraint)** được triển khai qua `ChunkingService`:
 
 #### 4.1.1. Các tham số cấu hình
-*   `eap.chunking.max-tokens`: Giới hạn kích thước tối đa của mỗi mảnh (Mặc định: 512 tokens).
-*   `eap.chunking.similarity-threshold`: Ngưỡng tương đồng cosine tối thiểu giữa các ranh giới câu để gom nhóm (Mặc định: 0.68).
-*   `eap.chunking.window-size`: Cỡ cửa sổ trượt $K$ để tính toán ngữ cảnh trái/phải (Mặc định: 3).
-*   `eap.chunking.overlap-sentences`: Số lượng câu gối đầu khi ngắt phân đoạn (Mặc định: 1 câu).
-*   `eap.chunking.matryoshka-dim`: Số chiều rút gọn phục vụ so khớp ranh giới câu (Mặc định: 768).
-*   `eap.chunking.decay-weights`: Hệ số suy giảm trọng số của cửa sổ trượt (Mặc định: `[0.5, 0.3, 0.2]`).
+Các tham số phân mảnh được thiết kế dưới dạng cấu hình hệ thống động để có thể tinh chỉnh linh hoạt tại runtime không cần khởi động lại ứng dụng:
+*   `eap.chunking.paragraph-separator`: Ký tự ngắt đoạn văn bản tự nhiên (Mặc định: `\n\n`).
+*   `eap.chunking.max-tokens`: Giới hạn kích thước tối đa của mỗi mảnh (Mặc định: 1000 tokens).
+*   `eap.chunking.min-tokens`: Giới hạn kích thước tối thiểu của mỗi mảnh (Mặc định: 100 tokens).
+*   `eap.chunking.overflow-max-tokens`: Kích thước tràn tối đa của chunk liền trước khi gộp phần dư (Mặc định: 1100 tokens).
 
 #### 4.1.2. Giải thuật phân mảnh chi tiết
-1.  **Bước 1: Chuẩn hoá văn bản & Phát hiện Neo cấu trúc**:
-    *   Chuyển đổi văn bản thô sang Unicode chuẩn **NFC** và chuẩn hóa khoảng trắng.
-    *   Sử dụng `java.text.BreakIterator` phiên bản tiếng Việt để cắt văn bản thành danh sách câu $S = [s_1, s_2, ..., s_N]$.
-    *   Sử dụng Regex quét và đánh dấu các chỉ số bắt đầu các **Neo cấu trúc cưỡng bức** (như ranh giới Chương, Điều, Mục, Hỏi/Đáp) lưu vào tập hợp $A_{\text{force}}$.
-2.  **Bước 2: Batch Inference sinh Vector & Token Counts**:
-    *   Gửi toàn bộ danh sách câu xuống ONNX Runtime qua **một cuộc gọi JNI duy nhất**:
-        `EmbeddingBatchResult batchResult = embeddingService.embedBatchWithTokenCounts(sentences);`
-    *   ONNX Runtime trả về ma trận vector nhúng $N \times 1024$ cùng mảng số lượng token của từng câu `tokenCounts`.
-3.  **Bước 3: Cắt lát Matryoshka (768-dim)**:
-    *   Trích xuất 768 chiều đầu tiên của mỗi vector câu tạo thành ma trận $E_{768} = [E_1, E_2, ..., E_N], E_i \in \mathbb{R}^{768}$.
-4.  **Bước 4: Tính tương đồng Cửa sổ trượt có trọng số**:
-    *   Tại mỗi ranh giới $i$ giữa câu $i$ và câu $i+1$, tính vector đại diện ngữ cảnh trái ($LW_i$) và phải ($RW_i$):
-        $$V(LW_i) = \sum_{k=0}^{K-1} w_k E_{i-k}, \quad V(RW_i) = \sum_{k=0}^{K-1} w_k E_{i+1+k}$$
-        (Trong đó $w = [0.5, 0.3, 0.2]$. Áp dụng **Dynamic Weight Redistribution** phân phối lại trọng số nếu chạm biên câu đầu/cuối tài liệu).
-    *   Tính khoảng cách ngữ nghĩa tại ranh giới $i$:
-        $$Distance_i = 1.0 - \frac{V(LW_i) \cdot V(RW_i)}{\|V(LW_i)\| \|V(RW_i)\|}$$
-5.  **Bước 5: Quét ranh giới & Quyết định cắt**:
-    *   Duyệt qua từng ranh giới $i$ từ 1 đến $N-1$, thực hiện ngắt chunk nếu thỏa mãn ít nhất một trong các điều kiện:
-        1. Ranh giới tiếp theo là neo cấu trúc cưỡng bức: $i+1 \in A_{\text{force}}$.
-        2. Khoảng cách ngữ nghĩa vượt ngưỡng: $Distance_i \ge 1.0 - \text{similarity-threshold}$ (tương đương $Distance_i \ge 0.32$).
-        3. Token tích lũy của chunk hiện tại chuẩn bị vượt giới hạn: $\sum \text{tokens} + \text{tokens}_{i+1} > \text{max-tokens}$.
-6.  **Bước 6: Gom nhóm Chunk & Overlap**:
-    *   Đóng gói các câu thuộc chunk hiện tại.
-    *   Tính vector nhúng đại diện cho chunk (1024-dim) bằng cách chạy **Mean Pooling** (trung bình cộng) các vector 1024-dim của các câu trong chunk, sau đó **bắt buộc chuẩn hóa L2** lại vector chunk này trước khi lưu.
-    *   Khởi tạo chunk mới. Áp dụng overlap gối đầu $O$ câu (Mặc định: 1). **Khóa chặn Overlap**: Nếu điểm ngắt do Neo cấu trúc cưỡng bức, đặt $O = 0$ để tránh rò rỉ ngữ cảnh chéo.
-
-
+1.  **Bước 1: Chuẩn hoá văn bản & Phân tách tự nhiên**:
+    *   Chuyển đổi văn bản thô sang Unicode chuẩn **NFC** và chuẩn hóa khoảng trắng thừa.
+    *   Tách văn bản thô thành danh sách các đoạn văn bản tự nhiên dựa trên ký tự ngắt đoạn cấu hình trong `eap.chunking.paragraph-separator` (mặc định là dấu xuống dòng kép `\n\n`).
+2.  **Bước 2: Duyệt từng đoạn và kiểm tra kích thước (Max Tokens Constraint)**:
+    *   Duyệt qua danh sách các đoạn văn bản tự nhiên vừa phân tách. Với mỗi đoạn, tính toán số lượng token.
+    *   Nếu độ dài (tính bằng số lượng token) của đoạn văn $\le T_{\max}$ (`eap.chunking.max-tokens`), đoạn văn này được lưu trữ trực tiếp thành 1 chunk độc lập.
+3.  **Bước 3: Cắt cứng tại câu khi vượt quá giới hạn (Hard Split)**:
+    *   Nếu đoạn văn tự nhiên có độ dài $> T_{\max}$ tokens, tiến hành phân rã đoạn văn đó thành danh sách các câu tiếng Việt (dựa trên các dấu câu ngắt câu `.`, `?`, `!`).
+    *   Thực hiện gom nhóm các câu từ đầu đoạn văn cho đến khi tổng số token đạt sát nút giới hạn $T_{\max}$. Điểm ngắt sẽ nằm tại ranh giới câu gần nhất không làm vượt quá $T_{\max}$.
+    *   Hệ thống không sử dụng tính toán vector tương đồng giữa các câu in-memory và không áp dụng cơ chế overlap (overlap = 0) giữa các chunk khi ngắt.
+4.  **Bước 4: Tránh phân mảnh vụn (Min Chunk Size Constraint)**:
+    *   Khi cắt cứng, nếu phần dư (residual) của câu còn lại ở cuối đoạn văn có kích thước nhỏ hơn giới hạn tối thiểu $T_{\min}$ (`eap.chunking.min-tokens`), hệ thống sẽ thực hiện:
+        *   Gộp phần dư này vào chunk liền trước, chấp nhận kích thước của chunk liền trước vượt quá $T_{\max}$ một chút nhưng không được phép vượt quá giới hạn tràn tối đa $T_{\text{overflow\_max}}$ (`eap.chunking.overflow-max-tokens` - mặc định là 1100 tokens).
+        *   Trường hợp nếu gộp vào làm vượt quá $T_{\text{overflow\_max}}$, hệ thống thực hiện phân bổ lại điểm cắt tại các ranh giới câu gần đó sao cho độ dài của chunk trước và chunk sau tương đối cân bằng và đều lớn hơn $T_{\min}$.
+5.  **Bước 5: Tính lũy đẳng (Idempotency)**:
+    *   Quy trình phân mảnh đảm bảo tính xác định (deterministic). Khi số hóa lại cùng một tài liệu, các chunk được tạo ra sẽ trùng khớp hoàn toàn, đảm bảo ghi đè/cập nhật chính xác lên dữ liệu cũ dựa trên khoá duy nhất `uq_document_chunk (document_id, chunk_index)`.
 
 ---
 
@@ -584,21 +575,21 @@ Quy trình tìm kiếm tương đồng ngữ nghĩa thực hiện chuyển đổ
 
 ### 5.2. Raw SQL Queries (Truy vấn SQL thực tế)
 #### 5.2.1. Câu truy vấn tìm kiếm tương đồng vector và lọc bảo mật tích hợp
-Đây là truy vấn cốt lõi thực thi tìm kiếm ngữ nghĩa đồng thời áp dụng toàn bộ các chính sách phân quyền tại cơ sở dữ liệu:
+Đây là truy vấn cốt lõi thực thi tìm kiếm ngữ nghĩa đồng thời áp dụng toàn bộ các chính sách phân quyền tại cơ sở dữ liệu. Để tăng tính rõ ràng và loại bỏ rủi ro sai sót thứ tự, câu lệnh sử dụng **Named Parameters** và hiển thị tiêu đề tài liệu gốc chéo phòng ban theo đúng PRD:
 
 ```sql
 SELECT 
     c.id AS chunk_id,
     c.content AS chunk_content,
     d.id AS document_id,
-    COALESCE(a.title, d.title) AS display_title,
+    d.title AS display_title,
     d.business_code AS document_business_code,
-    1.0 - (c.embedding <=> CAST(? AS vector)) AS similarity_score -- Tính tương đồng Cosine = 1 - Cosine Distance
+    1.0 - (c.embedding <=> CAST(:queryVector AS vector)) AS similarity_score -- Tính tương đồng Cosine = 1 - Cosine Distance
 FROM tbl_chunks c
 JOIN tbl_documents d ON c.document_id = d.id
 -- Left Join để kiểm tra liên kết Alias đang hoạt động được chia sẻ tới phòng ban của user hiện tại
 LEFT JOIN tbl_documents a ON a.parent_id = d.id 
-                         AND a.owner_department_id = ? -- ? đại diện cho userDeptId
+                         AND a.owner_department_id = :userDeptId 
                          AND a.deleted_at IS NULL 
 WHERE d.parent_id IS NULL -- Chỉ lấy các phân mảnh thuộc tài liệu gốc
   AND d.status = 'COMPLETED' -- Tài liệu gốc phải số hoá hoàn thành
@@ -606,7 +597,7 @@ WHERE d.parent_id IS NULL -- Chỉ lấy các phân mảnh thuộc tài liệu g
   AND (
       -- Điều kiện cách ly phòng ban:
       -- Quyền 1: Người dùng thuộc phòng ban sở hữu tài liệu gốc
-      d.owner_department_id = ? -- ? đại diện cho userDeptId
+      d.owner_department_id = :userDeptId
       OR
       -- Quyền 2: Tài liệu được chia sẻ hợp lệ qua Alias tới phòng ban của người dùng
       a.id IS NOT NULL
@@ -614,16 +605,19 @@ WHERE d.parent_id IS NULL -- Chỉ lấy các phân mảnh thuộc tài liệu g
   -- Quy tắc cô lập tuyệt đối của BOARD:
   -- Nếu tài liệu gốc thuộc sở hữu của BOARD, bắt buộc người dùng thực hiện truy vấn cũng phải thuộc phòng ban BOARD
   AND (
-      d.owner_department_id <> (SELECT id FROM tbl_departments WHERE code = 'BOARD')
+      d.owner_department_id <> :boardDeptId
       OR
       (
-          d.owner_department_id = (SELECT id FROM tbl_departments WHERE code = 'BOARD')
-          AND ? = (SELECT id FROM tbl_departments WHERE code = 'BOARD') -- ? đại diện cho userDeptId
+          d.owner_department_id = :boardDeptId
+          AND :userDeptId = :boardDeptId
       )
   )
+  -- Bộ lọc ngưỡng tương đồng tối thiểu (Similarity Threshold):
+  -- Loại bỏ các mảnh có điểm tương đồng Cosine thấp hơn ngưỡng cấu hình động
+  AND (1.0 - (c.embedding <=> CAST(:queryVector AS vector))) >= :similarityThreshold
 -- Sử dụng toán tử <=> của pgvector để tìm kiếm trên chỉ mục HNSW
-ORDER BY c.embedding <=> CAST(? AS vector) ASC
-LIMIT ?; -- ? đại diện cho tham số limit truyền vào (Mặc định là 3)
+ORDER BY c.embedding <=> CAST(:queryVector AS vector) ASC
+LIMIT :limit;
 ```
 
 #### 5.2.2. Truy vấn xác thực liên kết Alias
@@ -646,7 +640,7 @@ SELECT EXISTS (
 ## 6. SECURITY & AUTHORIZATION DESIGN (THIẾT KẾ BẢO MẬT & PHÂN QUYỀN)
 
 ### 6.1. Department Isolation (Cách ly Phòng ban)
-Việc thực thi bảo mật phân quyền được dịch hoàn toàn thành các mệnh đề điều kiện (SQL predicates) lồng ghép trực tiếp vào câu lệnh SQL tìm kiếm vector:
+Việc thực thi bảo mật phân quyền và kiểm soát lọc kết quả được dịch hoàn toàn thành các mệnh đề điều kiện (SQL predicates) lồng ghép trực tiếp vào câu lệnh SQL tìm kiếm vector:
 
 *   **Department Isolation (Cô lập phòng ban)**:
     *   Người dùng thuộc phòng ban $D_A$ chỉ được tìm kiếm các mảnh văn bản thuộc tài liệu do $D_A$ sở hữu (tài liệu gốc) hoặc các tài liệu phòng ban khác chia sẻ cho $D_A$ thông qua Alias đang có hiệu lực.
@@ -664,6 +658,11 @@ Việc thực thi bảo mật phân quyền được dịch hoàn toàn thành c
         ```sql
         d.status = 'COMPLETED'
         ```
+*   **Similarity Threshold (Ngưỡng tương đồng tối thiểu)**:
+    *   Loại bỏ các kết quả có điểm tương đồng dưới ngưỡng cấu hình động (mặc định 0.60):
+        ```sql
+        (1.0 - (c.embedding <=> :queryEmbedding)) >= :similarityThreshold
+        ```
 
 ---
 
@@ -673,12 +672,11 @@ Phân giải quyền truy cập chia sẻ logic thông qua liên kết Alias ch�
 *   **Runtime Evaluation**: Trạng thái Alias được kiểm tra trực tiếp tại thời điểm truy vấn thông qua phép `LEFT JOIN` với dòng bản ghi Alias trong bảng `tbl_documents` (nơi `parent_id` trỏ đến ID tài liệu gốc và `owner_department_id` của Alias trùng với phòng ban của người dùng hiện tại).
 *   **Kiểm tra hiệu lực Alias**:
     *   Alias phải chưa bị xóa logic: `a.deleted_at IS NULL`.
-*   **Bảo mật Tiêu đề tài liệu (Title Obfuscation)**:
-    Để bảo vệ bí mật tiêu đề gốc chéo phòng ban theo đúng PRD, câu truy vấn SQL sẽ sử dụng hàm `COALESCE` để lấy tiêu đề thiết lập trên Alias hiển thị ra cho người dùng:
+*   **Hiển thị Tiêu đề tài liệu gốc**:
+    Để tuân thủ đúng yêu cầu trong kịch bản nghiệm thu của PRD (TC-4.3), khi người dùng được chia sẻ chéo phòng ban qua Alias truy xuất tài liệu, tiêu đề hiển thị đi kèm kết quả tìm kiếm vẫn hiển thị tiêu đề của tài liệu gốc (`d.title`) chứ không thực hiện ẩn hay làm lu mờ tiêu đề:
     ```sql
-    COALESCE(a.title, d.title) AS display_title
+    d.title AS display_title
     ```
-    Nếu truy cập trực tiếp từ phòng ban sở hữu (không qua Alias), `a.title` sẽ là `NULL`, hệ thống hiển thị tiêu đề gốc `d.title`. Nếu truy cập qua Alias, hệ thống sẽ hiển thị tiêu đề bảo mật của Alias `a.title`.
 
 ---
 
@@ -690,11 +688,11 @@ Tài liệu thuộc phòng ban Ban Giám đốc (BOARD) là tuyệt mật và c�
     Để ngăn chặn bất kỳ hành vi cố ý hoặc vô tình vượt quyền (ví dụ: một Alias của tài liệu BOARD bằng cách nào đó được chèn lén lút vào database), câu lệnh SQL tìm kiếm vector bổ sung một mệnh đề loại trừ tuyệt đối:
     ```sql
     AND (
-        d.owner_department_id <> (SELECT id FROM tbl_departments WHERE code = 'BOARD')
+        d.owner_department_id <> :boardDeptId
         OR
         (
-            d.owner_department_id = (SELECT id FROM tbl_departments WHERE code = 'BOARD')
-            AND :userDeptId = (SELECT id FROM tbl_departments WHERE code = 'BOARD')
+            d.owner_department_id = :boardDeptId
+            AND :userDeptId = :boardDeptId
         )
     )
     ```
@@ -799,7 +797,7 @@ Hệ thống sẽ đăng ký và cập nhật các chỉ số đo lường sau:
 
 ### 8.1. Unit & Integration Testing (Thiết kế Kiểm thử Lớp)
 #### 8.1.1. Kiểm thử đơn vị (Unit Tests)
-*   **`ChunkingServiceTest`**: Kiểm thử việc cắt câu tiếng Việt chính xác, loại trừ các từ viết tắt thông dụng, gộp nhóm ngữ nghĩa theo ngưỡng tương đồng, và kiểm soát giới hạn tối đa của mảnh.
+*   **`ChunkingServiceTest`**: Kiểm thử việc phân tách tài liệu dựa trên ký tự ngắt đoạn tự nhiên (mặc định `\n\n`), kiểm thử cơ chế cắt câu tiếng Việt tại ranh giới câu khi vượt quá giới hạn tối đa (`max-tokens`), kiểm thử tính năng tránh phân mảnh vụn bằng cách gộp phần dư dưới `min-tokens` vào mảnh liền trước, và kiểm thử sự tích hợp với cấu hình tham số động.
 *   **`EmbeddingServiceTest`**: Mô phỏng output sinh vector từ ONNX Runtime. Xác thực tính năng ném lỗi lập tức (fail-fast) nếu vector trả về không đúng 1024 chiều. Kiểm tra tính chính xác của hàm chuẩn hoá L2.
 *   **`DigitizationRetryTest`**: Sử dụng Mockito để giả lập luồng sinh vector bị lỗi. Kiểm tra việc thử lại đúng 3 lần, ghi nhận log và thực hiện skip mảnh lỗi thành công mà không làm sập tiến trình chung của tài liệu.
 
@@ -841,9 +839,9 @@ SELECT
     c.id AS chunk_id,
     c.content AS chunk_content,
     d.id AS document_id,
-    COALESCE(a.title, d.title) AS display_title,
+    d.title AS display_title,
     d.business_code AS document_business_code,
-    1.0 - (c.embedding <=> :queryEmbedding) AS similarity_score
+    1.0 - (c.embedding <=> CAST(:queryEmbedding AS vector)) AS similarity_score
 FROM tbl_chunks c
 JOIN tbl_documents d ON c.document_id = d.id
 LEFT JOIN tbl_documents a ON a.parent_id = d.id 
@@ -858,14 +856,16 @@ WHERE d.parent_id IS NULL
       a.id IS NOT NULL
   )
   AND (
-      d.owner_department_id <> (SELECT id FROM tbl_departments WHERE code = 'BOARD')
+      d.owner_department_id <> :boardDeptId
       OR
       (
-          d.owner_department_id = (SELECT id FROM tbl_departments WHERE code = 'BOARD')
-          AND :userDeptId = (SELECT id FROM tbl_departments WHERE code = 'BOARD')
+          d.owner_department_id = :boardDeptId
+          AND :userDeptId = :boardDeptId
       )
   )
-ORDER BY c.embedding <=> :queryEmbedding ASC
+  -- Lọc theo ngưỡng tương đồng tối thiểu
+  AND (1.0 - (c.embedding <=> CAST(:queryEmbedding AS vector))) >= :similarityThreshold
+ORDER BY c.embedding <=> CAST(:queryEmbedding AS vector) ASC
 LIMIT :limit;
 ```
 
@@ -892,6 +892,7 @@ Limit  (cost=278.87..295.56 rows=3 width=689) (actual time=33.318..34.005 rows=3
               Buffers: shared hit=1250 read=160
               ->  Index Scan using idx_chunks_embedding_hnsw on tbl_chunks c  (cost=254.10..41179.00 rows=10000 width=162) (actual time=32.587..32.913 rows=4 loops=1)
                     Order By: (embedding <=> '[-0.017562, ...]'::vector)
+                    Filter: ((1.0 - (embedding <=> '[-0.017562, ...]'::vector)) >= 0.60)
                     Buffers: shared hit=1238 read=160
               ->  Memoize  (cost=0.15..0.18 rows=1 width=63) (actual time=0.072..0.072 rows=1 loops=4)
                     Cache Key: c.document_id
@@ -922,8 +923,8 @@ Execution Time: 34.383 ms
     *   Hệ thống sử dụng đúng chỉ mục `idx_chunks_embedding_hnsw` thông qua phép quét `Index Scan` (`Order By: (embedding <=> ?)`). Tránh việc quét tuần tự toàn bộ bảng (`Seq Scan`) giúp tốc độ truy vấn đạt hiệu năng vượt trội khi số lượng dữ liệu mảnh tăng lên.
 2.  **Thời gian thực thi tối ưu (Execution Time)**:
     *   Tổng thời gian thực thi thực tế (`Execution Time`) chỉ mất **34.383 ms** trên tập dữ liệu thử nghiệm, đáp ứng xuất sắc SLA nghiệp vụ đề ra (yêu cầu dưới **50ms** trong cơ sở dữ liệu và dưới **500ms** cho toàn bộ API).
-3.  **Tối ưu hóa các chương trình con (InitPlans)**:
-    *   Các subquery lọc mã phòng ban `'BOARD'` (`InitPlan 1`, `InitPlan 2`, `InitPlan 3`) chỉ thực hiện quét chỉ mục `departments_code_key` một lần duy nhất với thời gian rất nhỏ (dưới `0.17ms`), kết quả trả về được lưu đệm và tái sử dụng cho các lần duyệt vòng lặp kế tiếp mà không phải quét lại bảng `tbl_departments`.
+3.  **Loại bỏ các truy vấn con tìm phòng BOARD (InitPlans)**:
+    *   Bằng việc chuyển ID phòng ban BOARD thành tham số truyền vào từ mã Java (`:boardDeptId`), cơ sở dữ liệu không cần thực hiện quét bảng `tbl_departments` thông qua các chương trình con `InitPlan` nữa, giúp tối ưu hóa hiệu năng và đơn giản hóa cây kế hoạch thực thi.
 4.  **Cơ chế Memoize hiệu quả**:
     *   PostgreSQL đã tối ưu hóa phép Join bằng cách tạo bộ đệm `Memoize` với khóa cache là `c.document_id` và `d.id`.
     *   Khi duyệt qua các mảnh (`tbl_chunks`) thuộc cùng một tài liệu gốc (`tbl_documents`), thông tin kiểm tra quyền của tài liệu sẽ được lấy trực tiếp từ cache (`Hits`) thay vì phải thực hiện lại truy vấn quét khóa chính `documents_pkey`, giúp giảm thiểu tối đa số lượng block dữ liệu cần đọc từ đĩa.
@@ -965,6 +966,7 @@ Limit  (cost=599.84..599.85 rows=3 width=689) (actual time=56.613..56.617 rows=3
                     Hash Cond: (c.document_id = d.id)
                     Buffers: shared hit=256
                     ->  Seq Scan on tbl_chunks c  (cost=0.00..350.00 rows=10000 width=162) (actual time=0.030..3.326 rows=10000 loops=1)
+                          Filter: ((1.0 - (embedding <=> '[-0.017562, ...]'::vector)) >= 0.60)
                           Buffers: shared hit=250
                     ->  Hash  (cost=4.02..4.02 rows=38 width=63) (actual time=0.168..0.169 rows=39 loops=1)
                           ->  Seq Scan on tbl_documents d  (cost=0.00..4.02 rows=38 width=63) (actual time=0.069..0.099 rows=39 loops=1)
