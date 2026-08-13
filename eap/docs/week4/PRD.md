@@ -74,9 +74,9 @@ graph TD
     
     SystemEAP["Hệ thống VCC-EAP (Nền tảng Lưu trữ Tri thức Doanh nghiệp)"]
     
-    Employee -->|Tải tài liệu, chia sẻ Alias,<br>Đặt câu hỏi tra cứu ngữ nghĩa| SystemEAP
+    Employee -->|Tải tài liệu, chia sẻ Alias, đặt câu hỏi tra cứu ngữ nghĩa| SystemEAP
     BoardUser -->|Đặt câu hỏi tra cứu tài liệu mật BOARD| SystemEAP
-    SysAdmin -->|Quản trị hệ thống<br>(Không được xem/tìm tài liệu)| SystemEAP
+    SysAdmin -->|Quản trị hệ thống, không được xem hoặc tìm tài liệu| SystemEAP
     
     style SystemEAP fill:#1F4E79,stroke:#1A365D,stroke-width:2px,color:#FFFFFF
     style Employee fill:#D84315,stroke:#BF360C,stroke-width:2px,color:#FFFFFF
