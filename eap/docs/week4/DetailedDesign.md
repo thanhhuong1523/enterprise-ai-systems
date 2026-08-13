@@ -324,6 +324,7 @@ CREATE TABLE tbl_chunks (
     chunk_index INT NOT NULL,
     content TEXT NOT NULL,
     embedding vector(1024), -- Cột vector nhúng cố định 1024 chiều
+    metadata JSONB DEFAULT '{}'::jsonb NOT NULL, -- Siêu dữ liệu ngữ cảnh (page_number, section_header, token_count)
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
     CONSTRAINT fk_chunks_document FOREIGN KEY (document_id) REFERENCES tbl_documents(id) ON DELETE CASCADE,
     CONSTRAINT uq_document_chunk UNIQUE (document_id, chunk_index) -- Đảm bảo không trùng lặp vị trí chunk của tài liệu
@@ -581,6 +582,7 @@ Quy trình tìm kiếm tương đồng ngữ nghĩa thực hiện chuyển đổ
 SELECT 
     c.id AS chunk_id,
     c.content AS chunk_content,
+    c.metadata AS chunk_metadata,
     d.id AS document_id,
     d.title AS display_title,
     d.business_code AS document_business_code,

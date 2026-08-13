@@ -348,7 +348,7 @@ Hệ thống sử dụng giải pháp **Phân mảnh theo Đoạn văn (Paragrap
 
 ### 10.2. Tách biệt Hạ tầng Lưu trữ (Storage Separation)
 * **Kho Lưu trữ Tệp tin (File Storage)**: Lưu trữ vật lý các tệp tài liệu gốc nguyên bản (PDF, Word, Excel). Các thuộc tính như cấu trúc thư mục, thuật toán đặt tên tệp, ghi tệp nguyên tử nằm ngoài phạm vi tài liệu này.
-* **Cơ sở dữ liệu Quan hệ (PostgreSQL + pgvector)**: Lưu trữ metadata tài liệu, cấu hình Alias, nội dung văn bản của từng mảnh (chunks) và vector nhúng 1024 chiều tương ứng.
+* **Cơ sở dữ liệu Quan hệ (PostgreSQL + pgvector)**: Lưu trữ metadata tài liệu, cấu hình Alias, nội dung văn bản của từng mảnh (`tbl_chunks`), vector nhúng 1024 chiều tương ứng và siêu dữ liệu ngữ cảnh nâng cao dưới dạng cột `metadata` kiểu dữ liệu `JSONB` (lưu trữ số trang `page_number`, tiêu đề phân đoạn `section_header`, số lượng token `token_count`). Cột `metadata` dạng `JSONB` cung cấp thông tin trích dẫn chi tiết và làm tiền đề mở rộng cơ chế Metadata Filtering ở các giai đoạn sau mà không làm thay đổi cấu trúc bảng cơ sở dữ liệu.
 
 ---
 

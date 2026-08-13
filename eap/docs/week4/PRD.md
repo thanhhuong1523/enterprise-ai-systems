@@ -125,7 +125,7 @@ graph TD
   * **Bộ lọc ngưỡng tương đồng tối thiểu (Similarity Threshold):** Hệ thống áp dụng một bộ lọc theo ngưỡng điểm tương đồng tối thiểu. Ngưỡng này là một cấu hình cố định của hệ thống (ví dụ mặc định là 0.60).
     * Bất kỳ kết quả nào có điểm tương đồng nhỏ hơn ngưỡng cấu hình hiện tại sẽ bị hệ thống loại bỏ khỏi danh sách kết quả trả về.
     * Trường hợp sau khi lọc không có đoạn văn bản nào đạt ngưỡng tương đồng hoặc không có tài liệu hợp lệ, hệ thống trả về kết quả trống và hiển thị thông báo thân thiện cho người dùng: *"Không tìm thấy thông tin phù hợp trong kho tài liệu của phòng ban bạn."*
-  * Mỗi đoạn văn bản trả về bắt buộc phải đi kèm thông tin nguồn gốc tài liệu (như mã tài liệu, tiêu đề tài liệu) để phục vụ đối chiếu nguồn trích dẫn.
+  * Mỗi đoạn văn bản trả về bắt buộc phải đi kèm thông tin nguồn gốc tài liệu (như mã tài liệu, tiêu đề tài liệu) và siêu dữ liệu trích dẫn chi tiết lưu dưới dạng cấu trúc JSONB (như số trang `page_number`, tiêu đề phần `section_header`, số lượng token `token_count`) để phục vụ đối chiếu nguồn trích dẫn phong phú.
 * **FR-4.8. Cách ly phòng ban tuyệt đối (Department Isolation)**:
   * Kết quả tìm kiếm của người dùng bắt buộc phải được giới hạn trong phạm vi phòng ban trực thuộc của người dùng đó, ngoại trừ trường hợp tài liệu được chia sẻ hợp lệ qua liên kết Alias.
   * **Ràng buộc an toàn tuyệt đối (Security Invariant)**: Hệ thống phải đảm bảo cô lập dữ liệu và phân quyền truy cập tuyệt đối giữa các phòng ban. Việc truy vấn kết hợp lọc phân quyền (phòng ban, Alias) và lọc trạng thái tài liệu (ở trạng thái **Hoàn thành** và không bị xóa logic) phải đảm bảo nguyên tắc bảo mật tối đa, không để xảy ra bất kỳ rò rỉ dữ liệu nào giữa các phòng ban.
