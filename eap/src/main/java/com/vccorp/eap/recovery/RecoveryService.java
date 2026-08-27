@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import org.springframework.beans.factory.annotation.Value;
 import java.time.LocalDateTime;
 
 @Service
@@ -20,17 +21,20 @@ public class RecoveryService implements ApplicationRunner {
     private final DocumentRepository documentRepository;
     private final WorkerScheduler workerScheduler;
     private final TransactionTemplate transactionTemplate;
+    private final boolean schedulerEnabled;
 
     public RecoveryService(DocumentRepository documentRepository,
                            WorkerScheduler workerScheduler,
-                           PlatformTransactionManager transactionManager) {
+                           PlatformTransactionManager transactionManager,
+                           @Value("${eap.worker.scheduler.enabled:true}") boolean schedulerEnabled) {
         this.documentRepository = documentRepository;
         this.workerScheduler = workerScheduler;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
+        this.schedulerEnabled = schedulerEnabled;
     }
 
     @Override
-    public void run(ApplicationArguments args) throws Exception {
+    public void run(ApplicationArguments args) {
         log.info("Executing Startup Recovery for interrupted processing tasks...");
         
         LocalDateTime now = LocalDateTime.now();
@@ -40,8 +44,8 @@ public class RecoveryService implements ApplicationRunner {
         
         log.info("Startup Recovery completed. Reset {} tasks from PROCESSING to READY.", affectedRows);
         
-        // Start the scheduler polling thread pool after recovery finishes
-        if (!workerScheduler.isRunning()) {
+        // Start the scheduler polling thread pool after recovery finishes if enabled
+        if (schedulerEnabled && !workerScheduler.isRunning()) {
             workerScheduler.start();
             log.info("WorkerScheduler started programmatically after startup recovery.");
         }

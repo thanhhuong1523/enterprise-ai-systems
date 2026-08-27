@@ -41,7 +41,7 @@ public class WorkerSchedulerImpl implements WorkerScheduler {
      * Khởi tạo WorkerSchedulerImpl.
      */
     public WorkerSchedulerImpl(WorkerExecutor workerExecutor,
-                               ThreadPoolTaskExecutor taskExecutor,
+                               @org.springframework.beans.factory.annotation.Qualifier("workerTaskExecutor") ThreadPoolTaskExecutor taskExecutor,
                                DocumentRepository documentRepository,
                                @Value("${eap.worker.polling-interval-ms:1000}") long pollingIntervalMs,
                                @Value("${eap.worker.max-retries:5}") int maxRetries) {
@@ -73,8 +73,8 @@ public class WorkerSchedulerImpl implements WorkerScheduler {
                 () -> {
                      try {
                          pollTasks();
-                     } catch (Throwable t) {
-                         log.error("Unhandled error in task polling cycle", t);
+                     } catch (Exception e) {
+                         log.error("Unhandled error in task polling cycle", e);
                      }
                 },
                 0L,
@@ -151,8 +151,8 @@ public class WorkerSchedulerImpl implements WorkerScheduler {
                 log.error("Task {} submission was rejected by Thread Pool. Releasing task in DB.", task.id(), ex);
                 try {
                     documentRepository.releaseTask(task.id(), workerId, LocalDateTime.now());
-                } catch (Throwable t) {
-                    log.error("Failed to release task {} after executor rejection", task.id(), t);
+                } catch (Exception releaseEx) {
+                    log.error("Failed to release task {} after executor rejection", task.id(), releaseEx);
                 }
             }
         }

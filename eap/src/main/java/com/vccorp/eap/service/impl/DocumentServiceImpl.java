@@ -395,7 +395,7 @@ public class DocumentServiceImpl implements DocumentService {
         try {
             return fileStorageService.loadFile(doc.getFileReference());
         } catch (IOException e) {
-            throw new BusinessException(ErrorCode.ERR_SYSTEM_ERROR, "Không thể đọc dữ liệu tệp.");
+            throw new BusinessException(ErrorCode.ERR_STORAGE_ERROR, "Không thể đọc dữ liệu tệp.", e);
         }
     }
 

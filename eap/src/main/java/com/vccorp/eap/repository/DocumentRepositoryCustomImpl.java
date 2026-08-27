@@ -97,17 +97,18 @@ public class DocumentRepositoryCustomImpl implements DocumentRepositoryCustom {
     }
 
     @Override
-    public int markCompleted(UUID id, String workerId, int totalChunks, LocalDateTime now) {
+    public int markCompleted(UUID id, String workerId, int totalChunks, int skippedChunks, LocalDateTime now) {
         String sql = "UPDATE tbl_documents " +
                 "SET status = 'COMPLETED', " +
                 "    worker_id = NULL, " +
                 "    last_completed_chunk = ?, " +
+                "    skipped_chunks_count = ?, " +
                 "    updated_at = ? " +
                 "WHERE id = ? " +
                 "  AND worker_id = ? " +
                 "  AND status = 'PROCESSING' " +
                 "  AND deleted_at IS NULL";
-        return jdbcTemplate.update(sql, totalChunks, Timestamp.valueOf(now), id, workerId);
+        return jdbcTemplate.update(sql, totalChunks, skippedChunks, Timestamp.valueOf(now), id, workerId);
     }
 
     @Override

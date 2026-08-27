@@ -1,0 +1,4 @@
+eap:
+  worker:
+    scheduler:
+      enabled: false

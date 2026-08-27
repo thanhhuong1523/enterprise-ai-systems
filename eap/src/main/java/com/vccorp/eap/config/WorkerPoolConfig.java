@@ -40,10 +40,31 @@ public class WorkerPoolConfig {
         executor.setQueueCapacity(queueCapacity);
         executor.setThreadNamePrefix("WorkerExecutor-");
         
+        // Custom ThreadFactory to set Thread.MIN_PRIORITY (1) for background workers
+        executor.setThreadFactory(runnable -> {
+            Thread thread = new Thread(runnable);
+            thread.setName("WorkerExecutor-" + thread.getId());
+            thread.setPriority(Thread.MIN_PRIORITY);
+            return thread;
+        });
+        
         // Graceful shutdown configuration (Section 10.6)
         executor.setWaitForTasksToCompleteOnShutdown(true);
         executor.setAwaitTerminationSeconds(30);
         
+        executor.initialize();
+        return executor;
+    }
+
+    @Bean(name = "asyncRetrievalExecutor")
+    public ThreadPoolTaskExecutor asyncRetrievalExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(10);
+        executor.setMaxPoolSize(20);
+        executor.setQueueCapacity(100);
+        executor.setThreadNamePrefix("RetrievalExecutor-");
+        executor.setWaitForTasksToCompleteOnShutdown(true);
+        executor.setAwaitTerminationSeconds(5);
         executor.initialize();
         return executor;
     }

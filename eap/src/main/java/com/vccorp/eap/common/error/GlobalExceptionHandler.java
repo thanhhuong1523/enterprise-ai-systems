@@ -3,6 +3,8 @@ package com.vccorp.eap.common.error;
 import com.vccorp.eap.common.exception.BusinessException;
 import com.vccorp.eap.common.exception.ConcurrentUploadTimeoutException;
 import com.vccorp.eap.common.response.ApiResponse;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -13,6 +15,8 @@ import java.util.Map;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
     @ExceptionHandler(BusinessException.class)
     public ResponseEntity<ApiResponse<Void>> handleBusinessException(BusinessException ex) {
@@ -96,7 +100,7 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiResponse<Void>> handleGenericException(Exception ex) {
-        ex.printStackTrace(); // In ra stacktrace để gỡ lỗi nhanh
+        log.error("Unexpected exception occurred: ", ex);
         ErrorCode errorCode = ErrorCode.ERR_SYSTEM_ERROR;
         ApiResponse<Void> response = ApiResponse.error(errorCode.name(), errorCode.getDefaultMessage());
         return new ResponseEntity<>(response, errorCode.getHttpStatus());

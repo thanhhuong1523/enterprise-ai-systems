@@ -4,8 +4,9 @@ import com.vccorp.eap.dto.TaskClaimedResult;
 import com.vccorp.eap.model.Document;
 import com.vccorp.eap.recovery.RecoveryService;
 import com.vccorp.eap.repository.DocumentRepository;
+import com.vccorp.eap.service.DocumentTextExtractor;
 import com.vccorp.eap.worker.CheckpointService;
-import com.vccorp.eap.worker.MockProcessingService;
+import com.vccorp.eap.worker.DocumentChunkProcessor;
 import com.vccorp.eap.worker.WorkerExecutor;
 import com.vccorp.eap.worker.WorkerScheduler;
 import org.junit.jupiter.api.AfterEach;
@@ -32,14 +33,17 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
-@SpringBootTest
+@SpringBootTest(properties = "eap.chunking.min-paragraph-length=0")
 public class DocumentProcessingIntegrationTest {
 
     @MockBean
     private DocumentRepository documentRepository;
 
     @MockBean
-    private MockProcessingService mockProcessingService;
+    private DocumentChunkProcessor documentChunkProcessor;
+
+    @MockBean
+    private DocumentTextExtractor documentTextExtractor;
 
     @Autowired
     private CheckpointService checkpointService;
@@ -69,6 +73,9 @@ public class DocumentProcessingIntegrationTest {
         if (workerScheduler.isRunning()) {
             workerScheduler.stop();
         }
+        // Mock default successful text extraction
+        Mockito.lenient().when(documentTextExtractor.extractText(any(Path.class)))
+                .thenReturn("Paragraph 1.\n\nParagraph 2.\n\nParagraph 3.\n\nParagraph 4.\n\nParagraph 5.");
     }
 
     @AfterEach
@@ -84,7 +91,7 @@ public class DocumentProcessingIntegrationTest {
         // Given
         when(documentRepository.resetProcessingTasksToReady(any(LocalDateTime.class))).thenReturn(3);
 
-        RecoveryService recoveryService = new RecoveryService(documentRepository, workerScheduler, transactionManager);
+        RecoveryService recoveryService = new RecoveryService(documentRepository, workerScheduler, transactionManager, true);
 
         // When
         recoveryService.run(null);
@@ -142,19 +149,19 @@ public class DocumentProcessingIntegrationTest {
         when(documentRepository.findById(taskId)).thenReturn(Optional.of(doc));
         when(documentRepository.updateCheckpoint(eq(taskId), anyString(), anyInt(), any(LocalDateTime.class)))
                 .thenReturn(1);
-        when(documentRepository.markCompleted(eq(taskId), anyString(), eq(5), any(LocalDateTime.class)))
+        when(documentRepository.markCompleted(eq(taskId), anyString(), eq(5), eq(0), any(LocalDateTime.class)))
                 .thenReturn(1);
 
         // When
         workerExecutor.executeTask(taskId, "test-worker-1");
 
         // Then
-        // Should skip chunk 1 and 2, start processing chunk 3, 4, 5
-        verify(mockProcessingService, times(1)).processChunk(taskId, 3);
-        verify(mockProcessingService, times(1)).processChunk(taskId, 4);
-        verify(mockProcessingService, times(1)).processChunk(taskId, 5);
-        verify(mockProcessingService, never()).processChunk(taskId, 1);
-        verify(mockProcessingService, never()).processChunk(taskId, 2);
+        // Should skip chunk index 0 and 1, start processing chunk index 2, 3, 4
+        verify(documentChunkProcessor, times(1)).processChunk(eq(taskId), eq(2), anyString(), anyString(), anyInt());
+        verify(documentChunkProcessor, times(1)).processChunk(eq(taskId), eq(3), anyString(), anyString(), anyInt());
+        verify(documentChunkProcessor, times(1)).processChunk(eq(taskId), eq(4), anyString(), anyString(), anyInt());
+        verify(documentChunkProcessor, never()).processChunk(eq(taskId), eq(0), anyString(), anyString(), anyInt());
+        verify(documentChunkProcessor, never()).processChunk(eq(taskId), eq(1), anyString(), anyString(), anyInt());
 
         // Verify checkpoint committed for 3, 4, 5
         verify(documentRepository).updateCheckpoint(eq(taskId), eq("test-worker-1"), eq(3), any(LocalDateTime.class));
@@ -162,7 +169,7 @@ public class DocumentProcessingIntegrationTest {
         verify(documentRepository).updateCheckpoint(eq(taskId), eq("test-worker-1"), eq(5), any(LocalDateTime.class));
 
         // Verify marked complete
-        verify(documentRepository).markCompleted(eq(taskId), eq("test-worker-1"), eq(5), any(LocalDateTime.class));
+        verify(documentRepository).markCompleted(eq(taskId), eq("test-worker-1"), eq(5), eq(0), any(LocalDateTime.class));
     }
 
     @Test
@@ -185,7 +192,7 @@ public class DocumentProcessingIntegrationTest {
         workerExecutor.executeTask(taskId, "test-worker-1");
 
         // Then
-        verify(mockProcessingService, never()).processChunk(any(UUID.class), anyInt());
+        verify(documentChunkProcessor, never()).processChunk(any(UUID.class), anyInt(), anyString(), anyString(), anyInt());
         verify(documentRepository).markFailed(eq(taskId), eq("test-worker-1"), any(LocalDateTime.class));
     }
 
@@ -203,9 +210,9 @@ public class DocumentProcessingIntegrationTest {
                 .build();
         when(documentRepository.findById(taskId)).thenReturn(Optional.of(doc));
         
-        // Mock exception during processing
-        doThrow(new RuntimeException("Transient connection issue"))
-                .when(mockProcessingService).processChunk(eq(taskId), anyInt());
+        // Mock exception during text extraction (document level transient failure)
+        when(documentTextExtractor.extractText(any(Path.class)))
+                .thenThrow(new RuntimeException("Transient extraction failure"));
 
         when(documentRepository.updateRetryCount(eq(taskId), anyString(), any(LocalDateTime.class)))
                 .thenReturn(1);
@@ -214,8 +221,6 @@ public class DocumentProcessingIntegrationTest {
         workerExecutor.executeTask(taskId, "test-worker-1");
 
         // Then
-        // Chunk 1 retried 3 times internally, then fails
-        verify(mockProcessingService, times(3)).processChunk(taskId, 1);
         verify(documentRepository).updateRetryCount(eq(taskId), eq("test-worker-1"), any(LocalDateTime.class));
         verify(documentRepository, never()).markFailed(any(UUID.class), anyString(), any(LocalDateTime.class));
     }
@@ -234,8 +239,9 @@ public class DocumentProcessingIntegrationTest {
                 .build();
         when(documentRepository.findById(taskId)).thenReturn(Optional.of(doc));
         
-        doThrow(new RuntimeException("Permanent processing error"))
-                .when(mockProcessingService).processChunk(eq(taskId), anyInt());
+        // Mock exception during text extraction (document level permanent failure)
+        when(documentTextExtractor.extractText(any(Path.class)))
+                .thenThrow(new RuntimeException("Permanent extraction failure"));
 
         when(documentRepository.markFailed(eq(taskId), anyString(), any(LocalDateTime.class)))
                 .thenReturn(1);
@@ -246,5 +252,45 @@ public class DocumentProcessingIntegrationTest {
         // Then
         verify(documentRepository).markFailed(eq(taskId), eq("test-worker-1"), any(LocalDateTime.class));
         verify(documentRepository, never()).updateRetryCount(any(UUID.class), anyString(), any(LocalDateTime.class));
+    }
+
+    @Test
+    public void testWorkerExecutor_ChunkFailure_SkipsChunkAndCompletes() throws Exception {
+        // Given
+        String fileRef = tempFile.toAbsolutePath().toString();
+        Document doc = Document.builder()
+                .id(taskId)
+                .hash(hash)
+                .fileReference(fileRef)
+                .totalChunks(5)
+                .retryCount(0)
+                .lastCompletedChunk(0)
+                .build();
+        when(documentRepository.findById(taskId)).thenReturn(Optional.of(doc));
+        when(documentRepository.updateCheckpoint(eq(taskId), anyString(), anyInt(), any(LocalDateTime.class)))
+                .thenReturn(1);
+        
+        doThrow(new RuntimeException("Chunk persistence failed"))
+                .when(documentChunkProcessor).processChunk(eq(taskId), eq(1), anyString(), anyString(), anyInt());
+
+        when(documentRepository.markCompleted(eq(taskId), anyString(), eq(5), eq(1), any(LocalDateTime.class)))
+                .thenReturn(1);
+
+        // When
+        workerExecutor.executeTask(taskId, "test-worker-1");
+
+        // Then
+        // Verify other chunks were processed successfully
+        verify(documentChunkProcessor, times(1)).processChunk(eq(taskId), eq(0), anyString(), anyString(), anyInt());
+        verify(documentChunkProcessor, times(3)).processChunk(eq(taskId), eq(1), anyString(), anyString(), anyInt()); // Failed chunk retried 3 times
+        verify(documentChunkProcessor, times(1)).processChunk(eq(taskId), eq(2), anyString(), anyString(), anyInt());
+        verify(documentChunkProcessor, times(1)).processChunk(eq(taskId), eq(3), anyString(), anyString(), anyInt());
+        verify(documentChunkProcessor, times(1)).processChunk(eq(taskId), eq(4), anyString(), anyString(), anyInt());
+
+        // Verify checkpoint committed for all 5 chunks (since we still checkpoint skipped chunks)
+        verify(documentRepository, times(5)).updateCheckpoint(eq(taskId), eq("test-worker-1"), anyInt(), any(LocalDateTime.class));
+
+        // Verify marked complete with 1 skipped chunk
+        verify(documentRepository).markCompleted(eq(taskId), eq("test-worker-1"), eq(5), eq(1), any(LocalDateTime.class));
     }
 }

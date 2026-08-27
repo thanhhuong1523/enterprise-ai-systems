@@ -4,22 +4,21 @@ import com.vccorp.eap.common.error.ErrorCode;
 import com.vccorp.eap.common.exception.BusinessException;
 import com.vccorp.eap.model.Document;
 import com.vccorp.eap.repository.DocumentRepository;
+import com.vccorp.eap.service.DocumentTextExtractor;
 import com.vccorp.eap.worker.CheckpointService;
-import com.vccorp.eap.worker.MockProcessingService;
+import com.vccorp.eap.worker.DocumentChunkProcessor;
+import com.vccorp.eap.service.ParagraphChunker;
 import com.vccorp.eap.worker.WorkerExecutor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 import org.springframework.stereotype.Service;
-
-import com.vccorp.eap.worker.util.DocumentPageCounter;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -34,16 +33,22 @@ public class WorkerExecutorImpl implements WorkerExecutor {
     private static final int MAX_RETRIES = 5;
     private static final int MAX_CHUNK_RETRIES = 3;
 
-    private final MockProcessingService mockProcessingService;
+    private final DocumentChunkProcessor documentChunkProcessor;
+    private final ParagraphChunker paragraphChunker;
     private final CheckpointService checkpointService;
     private final DocumentRepository documentRepository;
+    private final DocumentTextExtractor documentTextExtractor;
 
-    public WorkerExecutorImpl(MockProcessingService mockProcessingService,
+    public WorkerExecutorImpl(DocumentChunkProcessor documentChunkProcessor,
+                              ParagraphChunker paragraphChunker,
                               CheckpointService checkpointService,
-                              DocumentRepository documentRepository) {
-        this.mockProcessingService = mockProcessingService;
+                              DocumentRepository documentRepository,
+                              DocumentTextExtractor documentTextExtractor) {
+        this.documentChunkProcessor = documentChunkProcessor;
+        this.paragraphChunker = paragraphChunker;
         this.checkpointService = checkpointService;
         this.documentRepository = documentRepository;
+        this.documentTextExtractor = documentTextExtractor;
     }
 
     @Override
@@ -75,8 +80,11 @@ public class WorkerExecutorImpl implements WorkerExecutor {
         } catch (InterruptedException e) {
             log.warn("Task {} processing was interrupted", taskId, e);
             Thread.currentThread().interrupt();
-        } catch (Throwable t) {
-            log.error("System error during processing task {}", taskId, t);
+        } catch (Error err) {
+            log.error("JVM Error during processing task {}", taskId, err);
+            throw err;
+        } catch (Exception e) {
+            log.error("System error during processing task {}", taskId, e);
             handleTransientFailure(document, workerId);
         } finally {
             MDC.clear();
@@ -88,27 +96,52 @@ public class WorkerExecutorImpl implements WorkerExecutor {
      */
     private void processTaskInternal(Document document, String workerId) throws IOException, InterruptedException {
         UUID taskId = document.getId();
-        String filePath = document.getFileReference();
+        Path filePath = document.getFileReference() != null ? Path.of(document.getFileReference()) : null;
 
         // 1. Verify physical file exists
-        if (filePath == null || !Files.exists(Path.of(filePath))) {
+        if (filePath == null || !Files.exists(filePath)) {
             documentRepository.markFailed(taskId, workerId, LocalDateTime.now());
             throw new BusinessException(ErrorCode.ERR_DOCUMENT_NOT_FOUND, "Không tìm thấy tệp vật lý: " + filePath);
         }
 
         // 2. Security Check: Calculate and verify file hash integrity
         String expectedHash = document.getHash();
-        String actualHash = calculateFileHash(filePath);
+        String actualHash;
+        try (InputStream is = Files.newInputStream(filePath)) {
+            actualHash = com.vccorp.eap.common.util.HashUtils.calculateSha256(is);
+        }
 
         if (expectedHash == null || !expectedHash.equalsIgnoreCase(actualHash)) {
             documentRepository.markFailed(taskId, workerId, LocalDateTime.now());
             throw new BusinessException(ErrorCode.ERR_HASH_MISMATCH, "Mã băm không khớp với tệp vật lý.");
         }
 
-        // 3. Resolve and initialize total chunks
+        // 3. Extract text and split paragraphs — PDF uses page-aware path; other formats use existing path
+
+        String mimeType;
+        try (InputStream is = Files.newInputStream(filePath)) {
+            byte[] header = is.readNBytes(256);
+            mimeType = new org.apache.tika.Tika().detect(header);
+        } catch (IOException e) {
+            mimeType = "application/octet-stream";
+        }
+
+
+        List<com.vccorp.eap.dto.ChunkDraft> drafts;
+        if ("application/pdf".equals(mimeType)) {
+            java.util.List<com.vccorp.eap.dto.PageContent> pages = documentTextExtractor.extractTextByPage(filePath);
+            drafts = paragraphChunker.chunkByPage(pages);
+            log.info("PDF '{}': dùng page-aware chunking, {} trang → {} chunks", taskId, pages.size(), drafts.size());
+        } else {
+            String rawText = documentTextExtractor.extractText(filePath);
+            drafts = paragraphChunker.chunkText(rawText);
+            log.info("File '{}' ({}): dùng standard chunking → {} chunks", taskId, mimeType, drafts.size());
+        }
+        int computedTotalChunks = drafts.size();
+
         int totalChunks = document.getTotalChunks() != null ? document.getTotalChunks() : 0;
         if (totalChunks <= 0) {
-            totalChunks = DocumentPageCounter.countPages(filePath);
+            totalChunks = computedTotalChunks;
             int affected = documentRepository.updateTotalChunks(taskId, workerId, totalChunks, LocalDateTime.now());
             if (affected == 0) {
                 throw new BusinessException(ErrorCode.ERR_OWNERSHIP_LOST, "Mất quyền sở hữu khi khởi tạo tổng số phân đoạn.");
@@ -117,6 +150,7 @@ public class WorkerExecutorImpl implements WorkerExecutor {
         }
 
         int lastCompleted = document.getLastCompletedChunk() != null ? document.getLastCompletedChunk() : 0;
+        int skippedChunks = 0;
 
         // 4. Processing Loop
         for (int k = lastCompleted + 1; k <= totalChunks; k++) {
@@ -125,7 +159,11 @@ public class WorkerExecutorImpl implements WorkerExecutor {
             }
 
             // Process chunk with internal retry up to 3 times
-            executeChunkWithRetry(taskId, k);
+            com.vccorp.eap.dto.ChunkDraft draft = drafts.get(k - 1);
+            boolean success = executeChunkWithRetry(taskId, k, draft.content(), draft.headingContext(), draft.pageNumber());
+            if (!success) {
+                skippedChunks++;
+            }
 
             // Commit checkpoint with ownership verification
             checkpointService.commitCheckpoint(taskId, workerId, k);
@@ -133,33 +171,29 @@ public class WorkerExecutorImpl implements WorkerExecutor {
         }
 
         // 5. Complete task
-        int affected = documentRepository.markCompleted(taskId, workerId, totalChunks, LocalDateTime.now());
+        int affected = documentRepository.markCompleted(taskId, workerId, totalChunks, skippedChunks, LocalDateTime.now());
         if (affected == 0) {
             throw new BusinessException(ErrorCode.ERR_OWNERSHIP_LOST, "Mất quyền sở hữu khi đánh dấu hoàn thành tài liệu.");
         }
     }
 
-    /**
-     * Thực thi một phân đoạn cụ thể kèm cơ chế thử lại nội bộ (lên tới 3 lần).
-     */
-    private void executeChunkWithRetry(UUID taskId, int k) throws InterruptedException {
+    private boolean executeChunkWithRetry(UUID taskId, int k, String content, String headingContext, int pageNumber) throws InterruptedException {
         for (int attempt = 1; attempt <= MAX_CHUNK_RETRIES; attempt++) {
             try {
-                mockProcessingService.processChunk(taskId, k);
-                return; // success
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw e;
+                documentChunkProcessor.processChunk(taskId, k - 1, content, headingContext, pageNumber);
+                return true; // success
             } catch (Exception e) {
                 log.warn("Attempt {}/{} failed for chunk {} of task {}", attempt, MAX_CHUNK_RETRIES, k, taskId, e);
                 if (attempt == MAX_CHUNK_RETRIES) {
-                    throw new BusinessException(ErrorCode.ERR_SYSTEM_ERROR, "Thất bại xử lý phân đoạn " + k + " sau " + MAX_CHUNK_RETRIES + " lần thử.", e);
+                    log.error("Failed to process chunk {} of task {} after {} attempts. Skipping chunk.", k, taskId, MAX_CHUNK_RETRIES, e);
+                    return false; // skip
                 }
                 long baseDelay = 500L * attempt;
                 long jitter = new java.util.Random().nextInt((int) (baseDelay * 0.4)) - (int) (baseDelay * 0.2); // +/- 20% Jitter
                 Thread.sleep(Math.max(0L, baseDelay + jitter));
             }
         }
+        return false;
     }
 
     /**
@@ -185,27 +219,5 @@ public class WorkerExecutorImpl implements WorkerExecutor {
         }
     }
 
-    /**
-     * Tính toán mã băm SHA-256 thực tế của tệp vật lý.
-     */
-    private String calculateFileHash(String filePath) throws IOException {
-        MessageDigest digest;
-        try {
-            digest = MessageDigest.getInstance("SHA-256");
-        } catch (NoSuchAlgorithmException e) {
-            throw new IOException("SHA-256 algorithm not available", e);
-        }
-        try (InputStream fis = Files.newInputStream(Path.of(filePath))) {
-            byte[] buffer = new byte[8192];
-            int bytesRead;
-            while ((bytesRead = fis.read(buffer)) != -1) {
-                digest.update(buffer, 0, bytesRead);
-            }
-        }
-        StringBuilder sb = new StringBuilder();
-        for (byte b : digest.digest()) {
-            sb.append(String.format("%02x", b));
-        }
-        return sb.toString();
-    }
+
 }

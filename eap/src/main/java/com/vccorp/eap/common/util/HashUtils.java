@@ -17,23 +17,24 @@ public final class HashUtils {
             byte[] hash = digest.digest(data);
             return bytesToHex(hash);
         } catch (NoSuchAlgorithmException e) {
-            throw new RuntimeException("Lỗi tính toán SHA-256", e);
+            throw new IllegalStateException("SHA-256 algorithm not available on this JVM", e);
         }
     }
 
-    public static String calculateSha256(InputStream inputStream) {
+    public static String calculateSha256(InputStream inputStream) throws IOException {
+        MessageDigest digest;
         try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] buffer = new byte[8192];
-            int bytesRead;
-            while ((bytesRead = inputStream.read(buffer)) != -1) {
-                digest.update(buffer, 0, bytesRead);
-            }
-            byte[] hash = digest.digest();
-            return bytesToHex(hash);
-        } catch (NoSuchAlgorithmException | IOException e) {
-            throw new RuntimeException("Lỗi tính toán SHA-256", e);
+            digest = MessageDigest.getInstance("SHA-256");
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 algorithm not available on this JVM", e);
         }
+        byte[] buffer = new byte[8192];
+        int bytesRead;
+        while ((bytesRead = inputStream.read(buffer)) != -1) {
+            digest.update(buffer, 0, bytesRead);
+        }
+        byte[] hash = digest.digest();
+        return bytesToHex(hash);
     }
 
     private static String bytesToHex(byte[] bytes) {
