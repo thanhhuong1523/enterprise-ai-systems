@@ -1,5 +1,5 @@
 # TÀI LIỆU YÊU CẦU SẢN PHẨM (PRD)
-**Tuần 4: Số hóa & Tra cứu Tri thức Cơ bản (Basic RAG - Retrieval Layer)**
+**Số hóa & Tra cứu Tri thức Cơ bản (Basic RAG - Retrieval Layer)**
 
 ---
 
@@ -8,235 +8,195 @@
 ### 1.1. Thông tin Tài liệu
 | Trường thông tin | Giá trị |
 | :--- | :--- |
-| **Tiêu đề Tài liệu** | Tài liệu Yêu cầu Sản phẩm - Tuần 4 (PRD-004) |
+| **Tiêu đề Tài liệu** | Tài liệu Yêu cầu Sản phẩm - Số hóa & Tra cứu Tri thức (PRD-004) |
 | **Dự án** | VCC Enterprise Archive Platform (VCC-EAP) |
-| **Phiên bản** | 1.1 |
+| **Phiên bản** | 1.3 |
 | **Trạng thái** | Hoàn thành |
 | **Tác giả** | Senior Product Analyst |
-| **Ngày phát hành** | 2026-08-13 |
+| **Ngày phát hành** | 2026-08-19 |
 
 ### 1.2. Lịch sử Thay đổi
 | Phiên bản | Ngày | Tác giả | Mô tả Thay đổi | Lý do |
 | :--- | :--- | :--- | :--- | :--- |
-| 1.0 | 2026-08-07 | Senior Product Analyst | Phiên bản đầu tiên. | |
-| 1.1 | 2026-08-13 | Senior Product Analyst | Chuẩn hóa PRD theo tiêu chuẩn IEEE và C4: loại bỏ chi tiết kỹ thuật, chuyển sang phương pháp chunking đơn giản, tích hợp ngưỡng tương đồng tối thiểu dạng cấu hình cố định, mô hình hóa Alias logic và tinh chỉnh NFRs. | Đơn giản hóa quy trình số hóa và tối ưu chất lượng tìm kiếm. |
+| 1.0 | 2026-08-07 | Senior Product Analyst | Phiên bản đầu tiên. | Yêu cầu ban đầu cho tính năng tra cứu tri thức. |
+| 1.1 | 2026-08-13 | Senior Product Analyst | Chuẩn hóa quy trình phân mảnh và tìm kiếm ngữ nghĩa cơ bản. | Đơn giản hóa quy trình và tích hợp bộ lọc tương đồng. |
+| 1.2 | 2026-08-14 | Senior Product Analyst | Cập nhật thuật toán phân mảnh (bỏ max/min token), tích hợp tiền lọc siêu dữ liệu (metadata pre-filtering) và loại bỏ các chi tiết kỹ thuật hệ thống. | Tối ưu hóa tính chính xác ngữ cảnh tra cứu và chuẩn hóa phạm vi tài liệu sản phẩm. |
+| 1.3 | 2026-08-19 | Senior Product Analyst | Bổ sung cơ chế trích xuất siêu dữ liệu tự động từ câu hỏi bằng LLM và tích hợp bộ lọc thuộc tính động khi tra cứu tri thức. | Tăng độ chính xác và tính phù hợp của ngữ cảnh tra cứu bằng cách kết hợp lọc thuộc tính siêu dữ liệu động. |
+| 1.4 | 2026-08-21 | Senior Product Analyst | Chuẩn hóa bản chốt 5 nhóm thuộc tính siêu dữ liệu nghiệp vụ và quy tắc ngắt sớm (short-circuit) khi không có phân đoạn nào thỏa mãn tiền lọc siêu dữ liệu. Cập nhật tối ưu hóa Prompt và cấu hình LLM (JSON Mode, xử lý trả về full schema và lọc rỗng ở Backend Java). | Đảm bảo độ chính xác tuyệt đối cho bộ lọc thuộc tính trong RAG, tăng tốc độ phản hồi và hạn chế timeout. |
+
+---
+
+## Mục lục
+1. [Quản lý Tài liệu](#1-quản-lý-tài-liệu-document-control)
+2. [Giới thiệu](#2-giới-thiệu-introduction)
+3. [Mô tả Tổng quan](#3-mô-tả-tổng-quan-overall-description)
+4. [Yêu cầu Chức năng](#4-yêu-cầu-chức-năng-functional-requirements)
+5. [Yêu cầu Phi chức năng](#5-yêu-cầu-phi-chức-năng-non-functional-requirements)
+6. [Quy tắc Nghiệp vụ](#6-quy-tắc-nghiệp-vụ-business-rules)
+7. [Kịch bản Nghiệm thu](#7-kịch-bản-nghiệm-thu-acceptance-criteria)
+8. [Chú giải & Chú thích](#8-chú-giải--chú-thích-glossary--references)
 
 ---
 
 ## 2. Giới thiệu (Introduction)
 
 ### 2.1. Bối cảnh Nghiệp vụ
-Doanh nghiệp lưu trữ lượng lớn tài liệu chính sách, quy chế và tài liệu nghiệp vụ. Nhân viên thường mất nhiều thời gian để tra cứu thông tin khi chỉ sử dụng phương pháp tìm kiếm từ khóa chính xác truyền thống. Tính năng tìm kiếm tương đồng ngữ nghĩa (Semantic Search) cho phép nhân viên đặt câu hỏi bằng ngôn ngữ tự nhiên và hệ thống tự động trả về chính xác đoạn văn bản chứa thông tin liên quan nhất, giúp tối ưu hóa hiệu suất làm việc.
-
-> [!IMPORTANT]
-> **Định nghĩa về Basic RAG trong Tuần 4**: Trong phạm vi phát triển của Tuần 4, hệ thống chỉ triển khai **Tầng Truy xuất dữ liệu (Retrieval Layer)**. Hệ thống nhận câu hỏi bằng ngôn ngữ tự nhiên, tìm kiếm các đoạn văn bản tương đồng ngữ nghĩa trong kho tri thức đã được số hóa và hiển thị kết quả trực tiếp cho người dùng kèm trích dẫn nguồn. Hệ thống **không** thực hiện việc tự sinh câu trả lời bằng LLM (LLM Generation/RAG Chatbot) hay tóm tắt nội dung tài liệu.
+Doanh nghiệp sở hữu khối lượng lớn tài liệu nghiệp vụ, quy định và chính sách nội bộ. Việc tra cứu thủ công hoặc tìm kiếm theo từ khóa truyền thống tốn nhiều thời gian và dễ bỏ sót thông tin do không hiểu được ngữ cảnh câu hỏi. Tính năng tìm kiếm tương đồng ngữ nghĩa (Semantic Search) cho phép nhân viên đặt câu hỏi bằng ngôn ngữ tự nhiên và nhận về chính xác các phân đoạn văn bản chứa câu trả lời. Ví dụ: khi nhân viên hỏi 'Tôi đi xe buýt đi làm có được trợ cấp không?', hệ thống phải tìm ra đoạn văn bản nói về 'chính sách hỗ trợ phương tiện công cộng' mặc dù hai câu này không trùng từ khóa.
 
 ### 2.2. Mục đích
-Tài liệu này đặc tả các yêu cầu sản phẩm đối với phân hệ **Số hóa & Tra cứu Tri thức Cơ bản (Basic RAG - Retrieval Layer)**. Tài liệu tập trung mô tả các hành vi chức năng từ góc nhìn của sản phẩm ("Làm cái gì và Tại sao"), thiết lập các ràng buộc bảo mật phòng ban và các tiêu chuẩn chất lượng (SLA) phục vụ cho quá trình thiết kế hệ thống.
+Tài liệu này đặc tả các yêu cầu nghiệp vụ đối với phân hệ **Số hóa & Tra cứu Tri thức Cơ bản**. Tài liệu tập trung làm rõ hành vi hệ thống, luồng nghiệp vụ và các ràng buộc bảo mật dữ liệu ở mức sản phẩm, làm cơ sở để xây dựng thiết kế kiến trúc và thiết kế chi tiết.
 
-### 2.3. Phạm vi (Scope)
-* **Quy trình Số hóa**: Tự động trích xuất nội dung văn bản của tài liệu gốc (PDF, Word, Excel), thực hiện phân mảnh theo đoạn văn (Paragraph Chunking) và tạo biểu diễn vector ngữ nghĩa cục bộ để lưu trữ bền vững.
-* **Quy trình Tra cứu (Retrieval Layer)**: Cung cấp API tiếp nhận câu hỏi bằng ngôn ngữ tự nhiên, thực hiện so khớp vector tương đồng ngữ nghĩa và trả về tối đa Top-3 đoạn văn bản liên quan nhất kèm thông tin trích dẫn nguồn.
-* **Kiểm soát Bảo mật**: Áp dụng quy tắc cô lập phòng ban nghiêm ngặt (Department Isolation), phân giải liên kết chia sẻ tài liệu (Alias Sharing), bảo vệ thông tin BOARD và xử lý tài liệu bị xóa logic.
-* **Ngoài phạm vi**: Không tự động sinh câu trả lời bằng LLM (RAG Generation), không xếp hạng lại (Re-ranking), không tìm kiếm lai (Hybrid Search), không xử lý nhận dạng ký tự từ hình ảnh (OCR).
-
-### 2.4. Thuật ngữ và Định nghĩa
-* **Tìm kiếm tương đồng ngữ nghĩa (Semantic Search)**: Phương thức tra cứu dựa trên ý nghĩa của câu hỏi thay vì so khớp từ khóa chính xác.
-* **Phân mảnh theo đoạn văn (Paragraph Chunking)**: Chia nhỏ văn bản gốc thành các phân đoạn (chunk) dựa trên dấu ngắt đoạn tự nhiên (như `\n\n`). Nếu đoạn văn dài vượt quá giới hạn tối đa (1000 tokens), hệ thống thực hiện cắt cứng (hard split) tại ranh giới câu mà không cần tính toán tương đồng ngữ nghĩa hay cơ chế chồng lấn (overlap).
-* **Vector biểu diễn ngữ nghĩa (Embedding)**: Biểu diễn toán học của một đoạn văn bản dưới dạng vector số thực để đo đạc độ tương đồng ý nghĩa.
-* **Cách ly Phòng ban (Department Isolation)**: Người dùng chỉ được tìm kiếm tài liệu thuộc sở hữu của phòng ban mình hoặc được phòng ban khác chia sẻ.
-* **Liên kết chia sẻ (Alias Sharing)**: Chia sẻ quyền truy cập tài liệu sang phòng ban khác dưới dạng liên kết logic, không nhân bản tệp vật lý.
-* **Xóa logic (Soft Delete)**: Trạng thái tài liệu bị ẩn khỏi hệ thống và không tham gia tra cứu nhưng không bị xóa vật lý ngay lập tức.
+### 2.3. Phạm vi Sản phẩm (Product Scope)
+*   **Quy trình Số hóa**: Tự động chuyển đổi tài liệu tải lên thành các phân đoạn văn bản và lưu trữ biểu diễn ngữ nghĩa tương ứng kèm theo siêu dữ liệu nội dung.
+*   **Quy trình Tra cứu**: Cung cấp giao diện/API tiếp nhận câu hỏi, thực hiện tiền lọc theo siêu dữ liệu và phân quyền, so khớp ngữ nghĩa để hiển thị các kết quả phù hợp nhất cho người dùng.
+*   **Không nằm trong phạm vi (Out of Scope)**: Không xây dựng mô hình tự sinh câu trả lời bằng LLM (RAG Chatbot - tạo câu trả lời tự nhiên từ ngữ cảnh cho người dùng), không xếp hạng lại kết quả (Re-ranking), không tìm kiếm lai (Hybrid Search) và không xử lý nhận dạng ký tự từ hình ảnh (OCR). Việc tích hợp LLM trong phạm vi sản phẩm này chỉ phục vụ duy nhất cho mục đích nhận diện các thuộc tính siêu dữ liệu từ câu hỏi đầu vào.
 
 ---
 
 ## 3. Mô tả Tổng quan (Overall Description)
 
 ### 3.1. Tác nhân Hệ thống (Actors)
-* **Nhân viên Nghiệp vụ**: Người dùng thuộc các phòng ban (như HR, Finance, R&D) có nhu cầu đặt câu hỏi tự nhiên để tra cứu thông tin trong phạm vi phòng ban hoặc tài liệu được chia sẻ hợp lệ.
-* **Ban Giám đốc (BOARD)**: Người dùng có quyền tra cứu tài liệu tuyệt mật của BOARD.
-* **Quản trị viên (SYSTEM_ADMIN)**: Người quản trị hệ thống, không có quyền truy cập nội dung tài liệu và không được sử dụng tính năng tìm kiếm ngữ nghĩa.
+*   **Nhân viên Nghiệp vụ**: Người dùng thuộc các phòng ban (bao gồm BOARD) có nhu cầu đặt câu hỏi tự nhiên để tra cứu thông tin trong phạm vi tài liệu thuộc phòng ban mình hoặc tài liệu được chia sẻ hợp lệ.
+*   **Quản trị viên (SYSTEM_ADMIN)**: Người vận hành hệ thống, không có quyền truy cập nội dung chi tiết của tài liệu nghiệp vụ và không được phép sử dụng chức năng tìm kiếm ngữ nghĩa.
 
-### 3.2. Giả định và Sự phụ thuộc
-* **Tài liệu hợp lệ**: Tài liệu tải lên hệ thống là tài liệu định dạng kỹ thuật số chứa văn bản có thể trích xuất trực tiếp (không phải ảnh quét).
-
----
-
-## 4. Bối cảnh Hệ thống (System Context - C1)
-
-Sơ đồ ngữ cảnh hệ thống (C1) thể hiện các tác nhân tương tác với hệ thống VCC-EAP đối với chức năng tra cứu tri thức:
+#### Sơ đồ Bối cảnh Hệ thống (C1 — System Context Diagram)
+Sơ đồ dưới đây mô tả tương tác cấp cao của các tác nhân với hệ thống VCC-EAP dưới góc độ nghiệp vụ sản phẩm:
 
 ```mermaid
 graph TD
-    Employee["Nhân viên Nghiệp vụ (HR, Finance, R&D)"]
-    BoardUser["Thành viên Ban Giám đốc (BOARD)"]
-    SysAdmin["Quản trị viên (SYSTEM_ADMIN)"]
+    Employee["Nhân viên Nghiệp vụ (HR, Finance, R&D, BOARD)"] -- "Gửi câu hỏi tự nhiên & bộ lọc thủ công" --> EAP["Hệ thống VCC-EAP (Hộp đen nghiệp vụ)"]
+    SysAdmin["Quản trị viên (SYSTEM_ADMIN)"] -- "Cấu hình hệ thống & Quản trị tài liệu (Bị chặn tìm kiếm ngữ nghĩa)" --> EAP
     
-    SystemEAP["Hệ thống VCC-EAP (Nền tảng Lưu trữ Tri thức Doanh nghiệp)"]
-    
-    Employee -->|Tải tài liệu, chia sẻ Alias, đặt câu hỏi tra cứu ngữ nghĩa| SystemEAP
-    BoardUser -->|Đặt câu hỏi tra cứu tài liệu mật BOARD| SystemEAP
-    SysAdmin -->|Quản trị hệ thống, không được xem hoặc tìm tài liệu| SystemEAP
-    
-    style SystemEAP fill:#1F4E79,stroke:#1A365D,stroke-width:2px,color:#FFFFFF
+    EAP -- "Trả về danh sách Top-K phân đoạn văn bản & trích dẫn nguồn" --> Employee
+
+    style EAP fill:#1F4E79,stroke:#1A365D,stroke-width:2px,color:#FFFFFF
     style Employee fill:#D84315,stroke:#BF360C,stroke-width:2px,color:#FFFFFF
-    style BoardUser fill:#C62828,stroke:#B71C1C,stroke-width:2px,color:#FFFFFF
     style SysAdmin fill:#37474F,stroke:#263238,stroke-width:2px,color:#FFFFFF
 ```
 
----
-
-## 5. Yêu cầu Chức năng (Functional Requirements)
-
-### 5.1. Quy trình Số hóa Tài liệu
-* **FR-4.1. Tiếp nhận tài liệu**: Hệ thống tự động phát hiện và tiếp nhận các tài liệu mới tải lên ở trạng thái sẵn sàng số hóa (Trạng thái **Chờ số hóa**).
-* **FR-4.2. Trích xuất văn bản**:
-  * Trích xuất nội dung văn bản từ các định dạng tệp được hỗ trợ: PDF, Word (docx), Excel (xlsx).
-  * Bảo đảm giữ nguyên định dạng chữ tiếng Việt có dấu.
-  * Trong trường hợp tệp không chứa văn bản trích xuất được, hệ thống chuyển tài liệu sang trạng thái lỗi xử lý (Trạng thái **Thất bại**) và lưu thông tin lỗi để phục vụ công tác quản trị.
-* **FR-4.3. Phân mảnh văn bản (Chunking)**:
-  * Hệ thống áp dụng phương pháp **Phân mảnh theo Đoạn văn** (Paragraph Chunking) để số hóa tài liệu. Văn bản thô được trích xuất sẽ được phân đoạn tự động dựa trên ký tự ngắt đoạn tự nhiên (mặc định là dấu xuống dòng kép `\n\n`).
-  * Hệ thống áp dụng cấu hình giới hạn kích thước tối đa của mỗi mảnh (tham số cấu hình hệ thống, ví dụ mặc định là 1000 tokens).
-    * Nếu đoạn văn tự nhiên có độ dài nhỏ hơn hoặc bằng giới hạn kích thước tối đa, toàn bộ đoạn văn đó được lưu thành **1 chunk**.
-    * Nếu đoạn văn tự nhiên dài vượt quá giới hạn tối đa, hệ thống thực hiện **cắt cứng (hard split)** đoạn văn tại ranh giới câu gần nhất (dựa trên dấu chấm câu `.`, `?`, `!`) để tạo thành các chunk nhỏ hơn nằm trong giới hạn tối đa. Hệ thống không sử dụng tính toán vector tương đồng giữa các câu và không áp dụng cơ chế overlap (gối đầu) giữa các chunk.
-    * **Xử lý tránh phân mảnh vụn (Min Chunk Size constraint):** Khi thực hiện cắt cứng đoạn văn, nếu phần dư còn lại của đoạn văn sau khi cắt có kích thước nhỏ hơn giới hạn tối thiểu quy định (tham số cấu hình hệ thống, ví dụ mặc định là 100 tokens), hệ thống sẽ thực hiện gộp phần dư này vào chunk liền trước (chấp nhận kích thước chunk liền trước vượt quá giới hạn tối đa một chút nhưng không vượt quá giới hạn tràn tối đa cấu hình, ví dụ mặc định là 1100 tokens) hoặc phân bổ lại điểm cắt tại các ranh giới câu gần đó sao cho độ dài của các chunk được phân chia tương đối cân bằng, tránh tạo ra phân mảnh quá nhỏ làm giảm chất lượng biểu diễn ngữ nghĩa.
-  * Toàn bộ quy trình phân mảnh và lưu trữ chunk phải đảm bảo tính **Idempotent (độc lập và nhất quán)**. Nếu tài liệu bị số hóa lại hoặc tiến trình bị gián đoạn và khởi động lại, các chunk mới lưu trữ phải ghi đè hoặc cập nhật chính xác lên các chunk cũ đã có của tài liệu đó, tránh trùng lặp dữ liệu.
-  * Các tham số phân mảnh (giới hạn tối đa của một chunk, giới hạn tối thiểu của chunk dư, ký tự phân tách đoạn) được thiết kế dưới dạng cấu hình cố định của hệ thống.
-* **FR-4.4. Tạo vector biểu diễn ngữ nghĩa**:
-  * Hệ thống tự động chuyển đổi từng đoạn văn bản thành một vector biểu diễn ngữ nghĩa (embedding) bằng mô hình nhúng cục bộ.
-  * Hệ thống áp dụng kiểm tra tính hợp lệ của vector nhúng được tạo ra (như số chiều vector tương thích với cấu hình). Nếu phát hiện lỗi cấu hình mô hình hoặc vector không hợp lệ, hệ thống sẽ dừng tiến trình số hóa của tài liệu đó và ghi nhận lỗi.
-  * Mỗi đoạn văn bản được liên kết chặt chẽ với vector ngữ nghĩa tương ứng của nó để phục vụ so khớp.
-* **FR-4.5. Lưu trữ, Quản lý Trạng thái và Hiển thị Đồng bộ (Document Lifecycle & Atomic Visibility)**:
-  * **Vòng đời nghiệp vụ tài liệu (Document Lifecycle)**: Quá trình số hóa tài liệu được quản lý và theo dõi thông qua các trạng thái nghiệp vụ: **Chờ số hóa** (sẵn sàng số hóa) -> **Đang số hóa** (đang thực hiện trích xuất và lưu trữ vector) -> **Hoàn thành** (hoàn tất số hóa và sẵn sàng tra cứu) hoặc **Thất bại** (gặp lỗi không thể phục hồi trong quá trình xử lý).
-  * **Độ hiển thị đồng bộ (Atomic Visibility)**: Để bảo toàn tính nhất quán của dữ liệu tra cứu, hệ thống áp dụng nguyên tắc chỉ những tài liệu đã đạt trạng thái **Hoàn thành** mới được đưa vào tập truy vấn tìm kiếm ngữ nghĩa. Người dùng không được phép tìm thấy bất kỳ chunk nào của tài liệu đang ở các trạng thái khác (**Chờ số hóa**, **Đang số hóa** hay **Thất bại**).
-  * **Xử lý lỗi một phần và cơ chế tự phục hồi (Partial Failure & Retry)**:
-    * Khi gặp sự cố lưu trữ tạm thời đối với một chunk cụ thể, hệ thống sẽ thực hiện thử lại tối đa **3 lần**.
-    * Nếu vẫn thất bại sau 3 lần thử lại, hệ thống sẽ ghi nhận cảnh báo, bỏ qua (SKIP) chunk bị lỗi này, cập nhật checkpoint tiến độ lưu trữ và tiếp tục xử lý các chunk tiếp theo của tài liệu.
-    * Khi toàn bộ các chunk của tài liệu được xử lý xong (kể cả có chunk bị bỏ qua), tài liệu vẫn sẽ được cập nhật trạng thái sang **Hoàn thành** để cho phép tra cứu các phần nội dung đã được số hóa thành công.
-
-### 5.2. Quy trình Tìm kiếm Tương đồng Ngữ nghĩa (Retrieval Layer)
-* **FR-4.6. Cổng API Tìm kiếm**:
-  * Tiếp nhận yêu cầu tìm kiếm từ người dùng dưới dạng câu hỏi ngôn ngữ tự nhiên.
-  * Tự động xác thực danh tính và xác định phòng ban trực thuộc của người dùng thực hiện yêu cầu.
-* **FR-4.7. Truy xuất tương đồng**:
-  * Chuyển đổi câu hỏi của người dùng thành vector biểu diễn ngữ nghĩa (sử dụng cùng mô hình nhúng với quy trình số hóa).
-  * Thực hiện tìm kiếm và đối sánh tương đồng giữa vector câu hỏi và vector các đoạn văn bản trong cơ sở dữ liệu dựa trên độ tương đồng vector.
-  * Sắp xếp kết quả tìm kiếm theo thứ tự độ liên quan giảm dần và trả về tối đa số lượng đoạn văn bản theo yêu cầu (mặc định hiển thị tối đa 3 kết quả liên quan nhất).
-  * **Bộ lọc ngưỡng tương đồng tối thiểu (Similarity Threshold):** Hệ thống áp dụng một bộ lọc theo ngưỡng điểm tương đồng tối thiểu. Ngưỡng này là một cấu hình cố định của hệ thống (ví dụ mặc định là 0.60).
-    * Bất kỳ kết quả nào có điểm tương đồng nhỏ hơn ngưỡng cấu hình hiện tại sẽ bị hệ thống loại bỏ khỏi danh sách kết quả trả về.
-    * Trường hợp sau khi lọc không có đoạn văn bản nào đạt ngưỡng tương đồng hoặc không có tài liệu hợp lệ, hệ thống trả về kết quả trống và hiển thị thông báo thân thiện cho người dùng: *"Không tìm thấy thông tin phù hợp trong kho tài liệu của phòng ban bạn."*
-  * Mỗi đoạn văn bản trả về bắt buộc phải đi kèm thông tin nguồn gốc tài liệu (như mã tài liệu, tiêu đề tài liệu) và siêu dữ liệu trích dẫn chi tiết lưu dưới dạng cấu trúc JSONB (như số trang `page_number`, tiêu đề phần `section_header`, số lượng token `token_count`) để phục vụ đối chiếu nguồn trích dẫn phong phú.
-* **FR-4.8. Cách ly phòng ban tuyệt đối (Department Isolation)**:
-  * Kết quả tìm kiếm của người dùng bắt buộc phải được giới hạn trong phạm vi phòng ban trực thuộc của người dùng đó, ngoại trừ trường hợp tài liệu được chia sẻ hợp lệ qua liên kết Alias.
-  * **Ràng buộc an toàn tuyệt đối (Security Invariant)**: Hệ thống phải đảm bảo cô lập dữ liệu và phân quyền truy cập tuyệt đối giữa các phòng ban. Việc truy vấn kết hợp lọc phân quyền (phòng ban, Alias) và lọc trạng thái tài liệu (ở trạng thái **Hoàn thành** và không bị xóa logic) phải đảm bảo nguyên tắc bảo mật tối đa, không để xảy ra bất kỳ rò rỉ dữ liệu nào giữa các phòng ban.
-* **FR-4.9. Chia sẻ tài liệu qua Alias (Alias Sharing)**:
-  * Hệ thống hỗ trợ chia sẻ quyền truy cập tài liệu gốc từ phòng ban sở hữu sang phòng ban khác bằng liên kết logic. Hệ thống tuyệt đối không nhân bản tệp tin vật lý, không tạo thêm phân đoạn (chunk) hoặc tính toán lại embedding cho tài liệu được chia sẻ.
-  * **Cơ chế truy cập**: Khi người dùng thực hiện tra cứu, hệ thống tự động phân giải quyền truy cập thông qua các liên kết Alias còn hiệu lực được chia sẻ đến phòng ban của người dùng hiện tại để trả về các phân đoạn thuộc tài liệu gốc tương ứng.
-* **FR-4.10. Kiểm soát trạng thái hiệu lực**:
-  * Hệ thống loại bỏ các tài liệu gốc đã bị đánh dấu xóa logic (Soft Delete) khỏi tập dữ liệu tra cứu.
-  * Nếu một liên kết chia sẻ (Alias) bị đánh dấu xóa logic (Soft Delete), người dùng thuộc phòng ban nhận liên kết đó lập tức mất quyền truy cập và tìm kiếm tài liệu tương ứng.
+### 3.2. Giả định và Sự phụ thuộc
+*   Tài liệu tải lên hệ thống là tài liệu định dạng kỹ thuật số chứa văn bản có thể trích xuất trực tiếp (không phải ảnh quét).
 
 ---
 
-## 6. Yêu cầu Phi chức năng (Non-functional Requirements)
+## 4. Yêu cầu Chức năng (Functional Requirements)
 
-### 6.1. Hiệu năng & Chất lượng (Performance & Quality)
-* **NFR-4.1. Mục tiêu độ trễ tìm kiếm (SLA)**: Độ trễ phản hồi cho một yêu cầu tìm kiếm tương đồng ngữ nghĩa phải đạt mức **p95 dưới 500ms**. Ranh giới đo lường (Measurement Boundary) được tính từ thời điểm hệ thống tiếp nhận yêu cầu tìm kiếm của người dùng, thực hiện sinh vector câu hỏi, truy vấn kết hợp lọc phân quyền và so khớp tương đồng ở tầng lưu trữ, cho đến khi gửi phản hồi kết quả tìm kiếm (không bao gồm độ trễ truyền tải mạng ngoài hệ thống).
-* **NFR-4.2. Thời gian xử lý số hóa (SLA)**: Quy trình số hóa bất đồng bộ đối với một tài liệu tiêu chuẩn dài 10 trang hướng tới mục tiêu hoàn thành **dưới 10 giây** kể từ khi hệ thống bắt đầu xử lý.
-* **NFR-4.3. Chất lượng tìm kiếm (SLA Hit Rate @ Top-3)**: Đảm bảo độ chính xác tìm kiếm (Retrieval Accuracy) đạt tỷ lệ tối thiểu **90%** trên tập dữ liệu kiểm thử chuẩn hóa (Ground Truth gồm 50 câu hỏi nghiệp vụ đã được gán nhãn sẵn đoạn văn chứa câu trả lời). Một kết quả tìm kiếm được tính là thành công (Hit) khi và chỉ khi đoạn văn bản chứa câu trả lời chính xác cho câu hỏi nằm trong **Top 3** kết quả được trả về đầu tiên từ hệ thống.
+### 4.1. Quy trình Số hóa Tài liệu
+*   **FR-4.1. Tiếp nhận tài liệu**: Hệ thống tự động phát hiện và tiếp nhận các tài liệu mới tải lên ở trạng thái chờ số hóa.
+*   **FR-4.2. Trích xuất văn bản**:
+    *   Hỗ trợ trích xuất nội dung văn bản tiếng Việt có dấu từ các định dạng tệp thông dụng (PDF, Word, Excel).
+    *   Nếu tệp lỗi không trích xuất được văn bản, hệ thống cập nhật trạng thái lỗi xử lý và ghi nhận thông tin lỗi.
+*   **FR-4.3. Phân mảnh văn bản (Chunking)**:
+    *   Hệ thống thực hiện phân mảnh văn bản dựa trên dấu ngắt đoạn tự nhiên (mặc định là dấu xuống dòng kép `\n\n`).
+    *   **Quy tắc phân loại và gộp**:
+        *   **Số đề mục (`1.`, `1.1`, `1.2`, `2`, `3`, `#`, `Chương`, `Điều`)**: Được nhận diện là **Headings (Tiêu đề)** và xử lý bởi bộ **Heading Stack Tracker** để duy trì cây tiêu đề bao hàm (`H1 > H2 > H3`).
+        *   **Bullet Items con (Dấu chấm `•`, Gạch đầu dòng `-`, `*`, `+`, Chữ cái `a)`, `b)`)**: Tất cả các bullet item con thuộc cùng một khối đoạn văn **được gộp toàn bộ vào cùng 1 phân đoạn (chunk) duy nhất** của khối đoạn văn cha đó, không xé lẻ từng gạch đầu dòng thành phân đoạn riêng.
+    *   Mỗi phân đoạn văn bản được tạo ra không áp dụng giới hạn kích thước ký tự hay số lượng từ (token) tối đa hoặc tối thiểu.
+    *   Đảm bảo tính lũy đẳng (Idempotent): khi thực hiện số hóa lại, các phân đoạn mới được tạo ra phải ghi đè hoặc cập nhật chính xác lên các phân đoạn cũ của chính tài liệu đó, tránh trùng lặp dữ liệu.
+*   **FR-4.4. Trích xuất và Lưu trữ Siêu dữ liệu Phân đoạn (Mô hình Trích xuất Lai)**:
+  *   Trong quá trình số hóa tài liệu, đối với mỗi phân đoạn văn bản được tạo ra, hệ thống tự động phân tích và ghi nhận các thuộc tính siêu dữ liệu nghiệp vụ chuẩn hóa bao gồm:
+        *   **Nhóm Phục vụ Tiền lọc ở Cơ sở dữ liệu (Pre-filtering)**:
+            *   **Thể loại tài liệu (`doc_type`)**: Loại hình văn bản (`guide`, `regulation`, `analysis`, `description`, `transaction`, `communication`, `education`, `news`, `literature`, `other`) dạng chữ thường — do LLM API trích xuất.
+            *   **Danh mục chủ đề nghiệp vụ (`topics`)**: Chủ đề lớn cốt lõi dạng Enum chữ thường (`hr_policy`, `compensation_benefits`, `finance_accounting`, `legal_compliance`, `it_technical`, `sales_marketing`, `operation_process`, `admin_facilities`, `board_direction`, `general_info`) — do LLM API trích xuất (thay thế cho `chunk_role` cũ).
+            *   **Thực thể tên riêng & Khái niệm nghiệp vụ (`entities`)**: Mảng thực thể trích xuất chi tiết dạng `type:value` chữ thường (`org:`, `dept:`, `person:`, `product:`, `law:`, `standard:`, `tech:`, `loc:`, `concept:`). Trong đó `concept:` bóc tách chi tiết các thuật ngữ nghiệp vụ, chế độ, phụ cấp, quyền lợi cụ thể — do LLM API trích xuất (thay thế cho `keywords` cũ).
+            *   **Mốc thời gian (`time_refs`)**: Các mốc thời gian liên quan được chuẩn hóa (`yyyy`, `yyyy-qn`, `yyyy-mm`, `yyyy-mm-dd`, `2 năm`, `đầu năm`, `cuối quý`) dạng chữ thường — do LLM API trích xuất.
+        *   **Nhóm Phục vụ Trích dẫn Vị trí trên Giao diện (Display Citation)**:
+            *   **Số trang (`page_number`)**: Số trang gốc trong tài liệu PDF (kiểu số nguyên).
+            *   **Cây tiêu đề trích dẫn (`citation_headings`)**: Mảng danh sách phân cấp các tiêu đề gốc nguyên bản của phân đoạn (giữ nguyên kiểu chữ nguyên bản - bao gồm chữ hoa như trong tài liệu gốc, ví dụ: `["Chương I: Quy định chung", "Mục 2: Lương cơ bản"]`).
+    *   **Ràng buộc Bắt buộc khi Số hóa (Ingestion Non-Null Constraint)**: Dữ liệu siêu dữ liệu (`metadata`) của mỗi phân đoạn sau khi số hóa BẮT BUỘC KHÔNG NULL và KHÔNG RỖNG `{}`. Nếu `doc_type` không rõ thể loại sẽ mặc định chọn `"other"`, `topics` không rõ chọn `["general_info"]`. Tất cả các giá trị metadata được chuẩn hóa về chữ thường (`lowercase`).
+    *   **Quy tắc bỏ thuộc tính rỗng**: Các thuộc tính tùy chọn rỗng (`null` hoặc `[]`) được lọc sạch tại Java Backend (`filterOmittedKeys()`), đảm bảo dữ liệu siêu dữ liệu tinh gọn nhưng luôn giữ đầy đủ các trường bắt buộc.
+    *   Hệ thống tự động chuyển đổi từng phân đoạn văn bản thành một biểu diễn ngữ nghĩa phục vụ tra cứu.
+*   **FR-4.5. Độ hiển thị đồng bộ**:
+    *   Chỉ các tài liệu đã hoàn thành số hóa thành công mới được đưa vào tập dữ liệu tra cứu. Người dùng không được phép tìm thấy bất kỳ phân đoạn nào của tài liệu đang xử lý hoặc bị lỗi số hóa.
+    *   Nếu có phân đoạn riêng lẻ gặp sự cố lưu trữ tạm thời, hệ thống tự động thử lại tối đa 3 lần. Nếu vẫn thất bại, hệ thống bỏ qua phân đoạn lỗi đó và tiếp tục xử lý các phân đoạn tiếp theo để đảm bảo tài liệu vẫn hoàn thành số hóa phần nội dung còn lại.
 
-### 6.2. Độ tin cậy (Reliability)
-* **NFR-4.4. Đồng bộ hóa quyền truy cập**: Khi tài liệu hoặc liên kết Alias bị đánh dấu xóa logic, hệ thống phải cập nhật lập tức hiệu lực truy cập trong kết quả tra cứu ngữ nghĩa.
-
-### 6.3. An toàn Bảo mật (Security)
-* **NFR-4.5. Ngăn ngừa rò rỉ dữ liệu (SLA)**: Đảm bảo an toàn thông tin, không xảy ra rò rỉ chéo dữ liệu giữa các phòng ban hoặc từ BOARD ra ngoài. Toàn bộ cơ chế kiểm tra quyền truy cập phòng ban và Alias phải được thực hiện triệt để ngay trong truy vấn dữ liệu ở tầng lưu trữ, không được lấy kết quả thô lên bộ nhớ ứng dụng rồi mới lọc.
-* **NFR-4.6. Chặn quyền quản trị viên**: Tài khoản quản trị hệ thống (SYSTEM_ADMIN) bị tước quyền tìm kiếm ngữ nghĩa và không được phép xem nội dung chi tiết của bất kỳ tài liệu nghiệp vụ nào.
-
-### 6.4. Khả năng Mở rộng (Scalability)
-* **NFR-4.7. Quy mô chỉ mục và Tải trọng hệ thống (Scalability & Load Baseline)**: Hệ thống phải duy trì hiệu năng tìm kiếm ổn định (đáp ứng p95 < 500ms) khi quy mô phân đoạn lưu trữ tăng trưởng lên tới **100,000 chunks**, đồng thời chịu tải ổn định với tần suất yêu cầu truy vấn đồng thời tối thiểu là **50 QPS (Queries Per Second)**.
-* **NFR-4.8. Khả năng xử lý tài liệu lớn**: Hệ thống phải có khả năng xử lý và số hóa các tài liệu lớn (quy mô từ 100 đến 1000 trang) mà không gây ra lỗi cạn kiệt tài nguyên hệ thống (như lỗi hết bộ nhớ - OOM) hoặc làm suy giảm hiệu năng của các tiến trình tìm kiếm đồng thời khác.
+### 4.2. Quy trình Tìm kiếm Tương đồng Ngữ nghĩa
+*   **FR-4.6. Tiếp nhận yêu cầu**: Hệ thống tiếp nhận câu hỏi bằng ngôn ngữ tự nhiên, tự động xác thực danh tính và xác định phòng ban của người dùng.
+*   **FR-4.7. Trích xuất Siêu dữ liệu tự động, Tiền lọc và Tìm kiếm ngữ nghĩa**:
+    *   **Trích xuất siêu dữ liệu tự động từ câu hỏi**: Khi tiếp nhận câu hỏi của người dùng, hệ thống tự động phân tích câu hỏi để nhận diện các tiêu chí siêu dữ liệu thuộc 4 nhóm thuộc tính tiền lọc (`doc_type`, `topics`, `entities`, `time_refs`). Trong đó, các trường `doc_type` và `topics` BẮT BUỘC KHÔNG NULL/KHÔNG RỖNG. Nếu câu hỏi không chỉ định rõ loại tài liệu hay chủ đề, hệ thống mặc định chọn `doc_type: "other"` và `topics: ["general_info"]`. Toàn bộ các giá trị siêu dữ liệu filter được chuẩn hóa tự động sang chữ thường (`lowercase`). Trường `keywords` đã được loại bỏ hoàn toàn khỏi bộ lọc câu hỏi.
+    *   **Tiền lọc siêu dữ liệu đóng vai trò Cổng chặn bắt buộc**: Hệ thống tự động khoanh vùng tập ứng viên bằng cách lọc các phân đoạn văn bản thỏa mãn đồng thời tiêu chí siêu dữ liệu do câu hỏi yêu cầu và quyền truy cập phòng ban của người dùng trước khi so khớp độ liên quan ngữ nghĩa.
+    *   **Quy tắc ngắt sớm (Short-Circuit)**: Nếu câu hỏi KHÔNG trích xuất được giá trị siêu dữ liệu nào HOẶC không có phân đoạn văn bản nào thỏa mãn các tiêu chí siêu dữ liệu yêu cầu, hệ thống lập tức ngắt luồng xử lý và trả về kết quả "Không tìm thấy kết quả phù hợp" (danh sách rỗng). Hệ thống tuyệt đối không tự động loại bỏ bộ lọc siêu dữ liệu để tìm kiếm vector toàn bảng.
+    *   Thực hiện so khớp độ liên quan ngữ nghĩa (Cosine Similarity) giữa câu hỏi và các phân đoạn văn bản đã thỏa mãn các điều kiện tiền lọc nêu trên.
+    *   Sắp xếp kết quả theo thứ tự điểm tương đồng giảm dần và lấy Top-K kết quả phù hợp nhất trả về cho người dùng (không áp dụng ngưỡng lọc điểm tương đồng cố định).
+    *   Mỗi phân đoạn văn bản trả về bắt buộc phải hiển thị kèm thông tin nguồn gốc tài liệu (như tiêu đề tài liệu, `page_number`, `citation_headings`) và các thông tin siêu dữ liệu tương ứng của phân đoạn đó.
+*   **FR-4.8. Cách ly phòng ban (Department Isolation)**: Người dùng chỉ được tìm kiếm các tài liệu thuộc phòng ban mình hoặc tài liệu phòng ban khác chia sẻ thông qua liên kết chia sẻ hợp lệ.
+*   **FR-4.9. Chia sẻ tài liệu (Alias Sharing)**: Hệ thống hỗ trợ chia sẻ quyền truy cập tài liệu sang phòng ban khác dưới dạng liên kết logic mà không thực hiện sao chép tệp vật lý hay tính toán lại biểu diễn ngữ nghĩa.
+*   **FR-4.10. Kiểm soát trạng thái hiệu lực**: Khi tài liệu hoặc liên kết chia sẻ bị đánh dấu xóa logic, người dùng liên quan lập tức mất quyền tìm kiếm và truy cập tài liệu tương ứng.
 
 ---
 
-## 7. Quy tắc Nghiệp vụ (Business Rules)
+## 5. Yêu cầu Phi chức năng (Non-functional Requirements)
 
-* **BR-4.1. Điều kiện số hóa**: Chỉ số hóa tài liệu đang ở trạng thái hoạt động và chưa bị đánh dấu xóa.
-* **BR-4.2. Điều kiện tham gia tra cứu**: Chỉ các đoạn văn bản thuộc tài liệu đã hoàn tất số hóa thành công mới được tham gia vào quá trình tìm kiếm tương đồng vector.
-* **BR-4.3. Định dạng hiển thị trích dẫn**: Kết quả tìm kiếm hiển thị đoạn nội dung liên quan để người dùng đọc nhanh, kèm theo link liên kết để mở tài liệu gốc nếu người dùng có đủ quyền hạn truy cập tài liệu đó.
-* **BR-4.4. Phân quyền chia sẻ tài liệu**: Chỉ phòng sở hữu tài liệu gốc mới có quyền tạo liên kết chia sẻ (Alias) sang phòng ban khác.
-* **BR-4.5. Ràng buộc bảo mật của BOARD**: Tài liệu thuộc phòng ban BOARD là tuyệt mật. Hệ thống cấm mọi hành vi tạo liên kết chia sẻ tài liệu BOARD ra ngoài, đồng thời BOARD cũng không tiếp nhận liên kết chia sẻ từ các phòng ban khác.
+### 5.1. Hiệu năng & Chất lượng (Performance & Quality)
+*   **NFR-4.1. Độ trễ tìm kiếm (SLA)**: Thời gian phản hồi cho yêu cầu tìm kiếm tương đồng ngữ nghĩa phải đạt mức **p95 dưới 500ms** (tính từ lúc nhận câu hỏi đến khi trả kết quả, không bao gồm độ trễ đường truyền mạng ngoài).
+*   **NFR-4.2. Thời gian số hóa (SLA)**: Quy trình số hóa bất đồng bộ đối với một tài liệu tiêu chuẩn dài 10 trang đạt mục tiêu hoàn thành **dưới 10 giây**.
+*   **NFR-4.3. Chất lượng tìm kiếm (Hit Rate)**: Đảm bảo độ chính xác tìm kiếm đạt tỷ lệ tối thiểu **90%** trên tập dữ liệu kiểm thử chuẩn hóa (kết quả chính xác nằm trong danh sách Top-K kết quả trả về đầu tiên).
+
+### 5.2. An toàn Bảo mật (Security)
+*   **NFR-4.4. Ngăn ngừa rò rỉ dữ liệu**: Cơ chế lọc quyền truy cập phòng ban, liên kết chia sẻ và trạng thái tài liệu phải được thực thi triệt để ngay tại bước tìm kiếm đầu tiên. Người dùng không được phép tiếp cận hoặc hiển thị bất kỳ dữ liệu nào ngoài phạm vi phòng ban được cấp quyền.
+*   **NFR-4.5. Chặn quyền quản trị viên**: Tài khoản quản trị hệ thống (SYSTEM_ADMIN) bị tước quyền thực hiện tìm kiếm ngữ nghĩa và không được phép xem nội dung chi tiết của tài liệu nghiệp vụ.
+
+### 5.3. Khả năng Mở rộng (Scalability)
+*   **NFR-4.6. Quy mô hệ thống**: Hệ thống duy trì hiệu năng ổn định (p95 < 500ms) khi quy mô dữ liệu tăng lên tới **100,000 phân đoạn** và chịu tải đồng thời tối thiểu **50 yêu cầu mỗi giây (50 QPS)**.
 
 ---
 
-## 8. Kịch bản Nghiệm thu (Acceptance Criteria)
+## 6. Quy tắc Nghiệp vụ (Business Rules)
+
+*   **BR-4.1. Điều kiện tham gia tra cứu**: Chỉ các phân đoạn thuộc tài liệu đã hoàn thành số hóa thành công và đang hoạt động (chưa bị xóa) mới được tham gia vào quá trình tìm kiếm tương đồng ngữ nghĩa.
+*   **BR-4.2. Phân quyền chia sẻ**: Chỉ phòng sở hữu tài liệu gốc mới có quyền tạo liên kết chia sẻ sang phòng ban khác.
+*   **BR-4.3. Cô lập tuyệt đối của BOARD**: Tài liệu thuộc phòng ban BOARD là tuyệt mật. Hệ thống cấm mọi hành vi tạo liên kết chia sẻ tài liệu BOARD ra ngoài, đồng thời BOARD cũng không tiếp nhận liên kết chia sẻ từ các phòng ban khác.
+*   **BR-4.4. Xử lý khi LLM trích xuất siêu dữ liệu rỗng hoặc lỗi**:
+    *   Trong trường hợp LLM không nhận diện hoặc trích xuất được bất kỳ thuộc tính siêu dữ liệu nào phù hợp từ câu hỏi (không nhận diện được thuộc tính siêu dữ liệu), hệ thống sẽ bỏ qua bước lọc siêu dữ liệu động từ câu hỏi và chỉ áp dụng các bộ lọc mặc định (phân quyền phòng ban và bộ lọc thủ công trên giao diện nếu có).
+    *   Trường hợp LLM gặp sự cố kết nối hoặc lỗi xử lý hệ thống, tiến trình trích xuất siêu dữ liệu động từ câu hỏi tự động được bỏ qua và chuyển hướng sang tìm kiếm ngữ nghĩa thông thường, tránh làm gián đoạn trải nghiệm người dùng.
+
+---
+
+## 7. Kịch bản Nghiệm thu (Acceptance Criteria)
 
 ### TC-4.1. Tìm kiếm ngữ nghĩa thành công trong phòng ban
-* **GIVEN**: Người dùng thuộc phòng ban HR đã đăng nhập. Hệ thống có tài liệu `Doc_HR_01` thuộc phòng HR đã hoàn thành số hóa, chứa đoạn văn bản: *"Chính sách hỗ trợ phương tiện công cộng áp dụng cho nhân viên đi xe buýt đi làm với mức trợ cấp 200,000 VND/tháng"*.
-* **WHEN**: Người dùng gửi yêu cầu tìm kiếm với câu hỏi bằng ngôn ngữ tự nhiên: *"Tôi đi xe buýt đi làm có được trợ cấp không?"*.
-* **THEN**:
-  1. Thời gian trả kết quả dưới 500ms.
-  2. Đoạn văn bản chứa quy định trợ cấp xe buýt hiển thị trong Top 3 kết quả đầu tiên.
-  3. Thông tin trích dẫn hiển thị đúng mã tài liệu và tiêu đề của `Doc_HR_01`.
+*   **GIVEN**: Người dùng thuộc phòng ban HR đã đăng nhập. Hệ thống có tài liệu của phòng HR đã hoàn thành số hóa, chứa nội dung: *"Chính sách hỗ trợ phương tiện công cộng áp dụng cho nhân viên đi xe buýt đi làm với mức trợ cấp 200,000 VND/tháng"*.
+*   **WHEN**: Người dùng gửi yêu cầu tìm kiếm với câu hỏi: *"Tôi đi xe buýt đi làm có được trợ cấp không?"*.
+*   **THEN**: 
+    1. Thời gian phản hồi dưới 500ms.
+    2. Phân đoạn chứa nội dung quy định trợ cấp xe buýt hiển thị trong danh sách Top-K kết quả đầu tiên kèm nguồn trích dẫn đúng.
 
 ### TC-4.2. Cách ly phòng ban tuyệt đối
-* **GIVEN**: Người dùng thuộc phòng ban R&D đã đăng nhập. Hệ thống có tài liệu `Doc_Finance_01` thuộc phòng FINANCE đã hoàn thành số hóa chứa thông tin lương thưởng và tài liệu này **chưa** được chia sẻ cho phòng R&D.
-* **WHEN**: Người dùng R&D gửi yêu cầu tìm kiếm với câu hỏi: *"Mức lương thưởng cuối năm là bao nhiêu?"*.
-* **THEN**: Kết quả trả về không chứa bất kỳ đoạn văn bản nào trích từ tài liệu `Doc_Finance_01`.
+*   **GIVEN**: Người dùng thuộc phòng ban R&D đã đăng nhập. Hệ thống có tài liệu thuộc phòng FINANCE chứa thông tin lương thưởng và tài liệu này chưa được chia sẻ cho phòng R&D.
+*   **WHEN**: Người dùng R&D gửi yêu cầu tìm kiếm với câu hỏi: *"Mức lương thưởng cuối năm là bao nhiêu?"*.
+*   **THEN**: Kết quả trả về trống hoặc không chứa bất kỳ phân đoạn nào thuộc tài liệu của phòng FINANCE.
 
-### TC-4.3. Tìm kiếm tài liệu chia sẻ qua Alias
-* **GIVEN**:
-  - Tài liệu gốc `Doc_Finance_02` thuộc phòng FINANCE có tiêu đề gốc là *"Quy chế Chi tiêu Nội bộ VCCorp"*, đã hoàn thành số hóa, chứa nội dung: *"Nhân viên đi công tác được thanh toán tối đa 1,000,000 VND tiền phòng/ngày"*.
-  - Phòng FINANCE đã tạo một liên kết chia sẻ (Alias) tài liệu này sang phòng HR.
-  - Người dùng thuộc phòng HR thực hiện tìm kiếm.
-* **WHEN**: Người dùng HR gửi yêu cầu tìm kiếm với câu hỏi: *"Đi công tác được chi bao nhiêu tiền phòng?"*.
-* **THEN**:
-  1. Kết quả tìm kiếm hiển thị đoạn văn bản trích từ tài liệu gốc `Doc_Finance_02`.
-  2. Tên tài liệu đi kèm kết quả hiển thị tiêu đề *"Quy chế Chi tiêu Nội bộ VCCorp"* (tiêu đề của tài liệu gốc).
+### TC-4.3. Tìm kiếm tài liệu chia sẻ qua liên kết
+*   **GIVEN**: Tài liệu gốc của phòng FINANCE có tiêu đề *"Quy chế Chi tiêu Nội bộ VCCorp"* đã hoàn thành số hóa và được tạo liên kết chia sẻ sang phòng HR. Người dùng thuộc phòng HR thực hiện tìm kiếm.
+*   **WHEN**: Người dùng HR gửi câu hỏi liên quan đến nội dung tài liệu chia sẻ đó.
+*   **THEN**: Kết quả tìm kiếm hiển thị phân đoạn văn bản trích từ tài liệu gốc của phòng FINANCE và hiển thị đúng tên tài liệu gốc *"Quy chế Chi tiêu Nội bộ VCCorp"*.
 
 ### TC-4.4. Không tìm kiếm trên tài liệu đã xóa
-* **GIVEN**: Tài liệu `Doc_HR_02` thuộc phòng HR đã bị đánh dấu xóa logic (Soft Delete) trên hệ thống.
-* **WHEN**: Người dùng thuộc phòng HR thực hiện tìm kiếm với câu hỏi khớp với nội dung của `Doc_HR_02`.
-* **THEN**: Kết quả trả về không chứa bất kỳ nội dung nào thuộc tài liệu `Doc_HR_02`.
+*   **GIVEN**: Tài liệu của phòng HR đã bị đánh dấu xóa logic.
+*   **WHEN**: Người dùng thuộc phòng HR tìm kiếm với câu hỏi khớp với nội dung tài liệu đã xóa.
+*   **THEN**: Kết quả trả về không chứa bất kỳ phân đoạn nào thuộc tài liệu đã xóa.
 
-### TC-4.5. Nghiệm thu chất lượng tìm kiếm (SLA Hit Rate @ Top-3)
-* **GIVEN**: Hệ thống đã số hóa hoàn thành tài liệu quy định nghỉ phép: *"Quy chế nghỉ phép năm quy định nhân viên được nghỉ tối đa 12 ngày làm việc hưởng nguyên lương"*.
-* **WHEN**: Người dùng thực hiện đặt câu hỏi ngôn ngữ tự nhiên không trùng khớp từ khóa chính xác: *"Một năm tôi được nghỉ bao nhiêu ngày phép mà vẫn được trả lương?"*.
-* **THEN**: Kết quả tìm kiếm trả về đoạn văn bản quy định nghỉ phép 12 ngày trong Top 3 kết quả đầu tiên.
+### TC-4.5. Kiểm thử bảo mật của BOARD
+*   **GIVEN**: Tài liệu thuộc phòng ban BOARD đã được số hóa.
+*   **WHEN**: Người dùng phòng ban khác cố gắng tạo liên kết chia sẻ tài liệu BOARD hoặc tìm kiếm thông tin liên quan đến tài liệu này.
+*   **THEN**: Hệ thống ngăn chặn việc tạo liên kết chia sẻ. Kết quả tìm kiếm của người dùng ngoài BOARD hoàn toàn trống rỗng và không tiết lộ sự tồn tại của tài liệu BOARD.
 
-### TC-4.6. Kiểm thử cách ly tuyệt đối và cấm chia sẻ tài liệu BOARD
-* **GIVEN**:
-  - Người dùng thuộc phòng ban HR đã đăng nhập.
-  - Hệ thống có tài liệu `Doc_BOARD_01` thuộc phòng BOARD đã số hóa hoàn thành.
-* **WHEN**:
-  - Có yêu cầu tạo Alias chia sẻ tài liệu `Doc_BOARD_01` cho phòng HR.
-  - Người dùng phòng HR thực hiện tìm kiếm ngữ nghĩa với câu hỏi liên quan đến nội dung tài liệu của BOARD.
-* **THEN**:
-  - Hệ thống từ chối yêu cầu tạo Alias và trả về lỗi phân quyền truy cập.
-  - Kết quả tìm kiếm của người dùng phòng HR hoàn toàn trống rỗng, không hiển thị bất kỳ cảnh báo hoặc thông báo nào làm lộ sự tồn tại của tài liệu BOARD.
-
-### TC-4.7. Kiểm thử chặn quyền tìm kiếm của Quản trị viên (SYSTEM_ADMIN)
-* **GIVEN**: Người dùng có vai trò `SYSTEM_ADMIN` đã đăng nhập. Hệ thống có tài liệu `Doc_HR_01` đã số hóa hoàn thành.
-* **WHEN**: Người dùng `SYSTEM_ADMIN` thực hiện yêu cầu tìm kiếm tương đồng ngữ nghĩa, hoặc cố gắng đọc nội dung tài liệu.
-* **THEN**:
-  - Hệ thống từ chối yêu cầu và báo lỗi không có quyền truy cập.
-  - Nhật ký giám sát ghi nhận hành vi truy cập trái phép của tài khoản quản trị để phục vụ công tác giám sát bảo mật.
+### TC-4.6. Tìm kiếm kết hợp trích xuất siêu dữ liệu động bằng LLM
+*   **GIVEN**: Người dùng thuộc phòng ban *Công nghệ (R&D)* đã đăng nhập vào hệ thống. Cơ sở dữ liệu chứa các phân đoạn tài liệu quy trình kiểm thử của phòng R&D có đính kèm siêu dữ liệu `entities: ["DEPT:rnd"]` and `chunk_role: ["procedure"]`.
+*   **WHEN**: Người dùng gửi câu hỏi tìm kiếm: *"Quy trình kiểm thử công nghệ của phòng R&D"*.
+*   **THEN**:
+    1. Hệ thống tự động nhận diện thuộc tính siêu dữ liệu: `entities: ["DEPT:rnd"]` và `chunk_role: ["procedure"]`.
+    2. Hệ thống tự động lọc ra các phân đoạn khớp với tiêu chí siêu dữ liệu trên cùng với phân quyền phòng ban của người dùng hiện tại.
+    3. Kết quả hiển thị chỉ bao gồm các phân đoạn thỏa mãn đồng thời các điều kiện lọc siêu dữ liệu trên. Các phân đoạn không khớp siêu dữ liệu bị loại bỏ hoàn toàn khỏi kết quả tìm kiếm.
 
 ---
 
-## 9. Ngoài Phạm vi (Out of Scope)
-* Không xây dựng mô hình tự sinh câu trả lời (LLM Generation/RAG Chatbot).
-* Không tích hợp tìm kiếm lai (Hybrid Search) kết hợp Full-text Search.
-* Không hỗ trợ xếp hạng lại kết quả (Re-ranking) bằng mô hình bổ sung.
-* Không hỗ trợ nhận dạng ký tự quang học (OCR) đối với định dạng ảnh quét.
-* Không lưu trữ lịch sử cuộc hội thoại (Multi-turn Chat).
-* Không hỗ trợ lọc nâng cao theo siêu dữ liệu (Metadata filtering) ngoài phạm vi phòng ban/Alias.
+## 8. Chú giải & Chú thích (Glossary & References)
 
----
-
-## 10. Chú giải (Glossary)
-* **BOARD**: Ban Giám đốc VCCorp, phòng ban tuyệt mật đặc biệt trong hệ thống.
-* **HR (Human Resources)**: Phòng ban Nhân sự.
-* **FINANCE**: Phòng ban Tài chính.
-* **R&D (Research and Development)**: Phòng ban Nghiên cứu và Phát triển.
-* **EAP (Enterprise Archive Platform)**: Nền tảng Lưu trữ Tri thức Doanh nghiệp.
-* **SYSTEM_ADMIN**: Tài khoản quản trị toàn bộ hệ thống EAP, bị tước quyền đọc tài liệu.
+### 8.1. Thuật ngữ viết tắt
+*   **RAG (Retrieval-Augmented Generation)**: Kỹ thuật tăng cường thông tin truy xuất từ kho tri thức trước khi đưa vào mô hình ngôn ngữ lớn (trong phân hệ này chỉ thực hiện tầng Retrieval).
+*   **Embedding**: Kỹ thuật biểu diễn thông tin văn bản dưới dạng vector số thực nhiều chiều để tính toán khoảng cách ngữ nghĩa.
+*   **Alias**: Liên kết logic chia sẻ tài liệu chéo phòng ban.
+*   **SLA (Service Level Agreement)**: Cam kết mức độ dịch vụ về thời gian phản hồi và chất lượng xử lý.
+*   **BOARD**: Ban Giám đốc, phòng ban bảo mật tuyệt đối đặc biệt.
+*   **SYSTEM_ADMIN**: Tài khoản quản trị vận hành hệ thống.

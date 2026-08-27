@@ -6,6 +6,8 @@ import { ToastProvider } from '@/components/Toast';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { AppRoutes } from '@/routes/AppRoutes';
 
+import { ChatWidget } from '@/components/ChatWidget';
+
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
@@ -23,6 +25,7 @@ function App() {
           <ToastProvider>
             <AuthProvider>
               <AppRoutes />
+              <ChatWidget />
             </AuthProvider>
           </ToastProvider>
         </ThemeProvider>

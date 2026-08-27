@@ -1,5 +1,5 @@
 # TÀI LIỆU THIẾT KẾ CHI TIẾT (DETAILED DESIGN DOCUMENT - DDD)
-**Số hóa & Tra cứu Tri thức Cơ bản (Basic RAG - Retrieval Layer) (Tuần 4 - Phiên bản 1.1)**
+**Số hóa & Tra cứu Tri thức Cơ bản (Basic RAG - Retrieval Layer) (Tuần 4 - Phiên bản 1.3)**
 
 ---
 
@@ -20,18 +20,21 @@
 | Thuộc tính | Chi tiết tài liệu |
 | :--- | :--- |
 | **Mã tài liệu (Document ID)** | DD-EAP-W4-001 |
-| **Phiên bản (Version)** | 1.1 |
-| **Trạng thái (Status)** | Sẵn sàng phê duyệt |
-| **Ngày phát hành (Date)** | 2026-08-13 |
+| **Phiên bản (Version)** | 1.3 |
+| **Trạng thái (Status)** | Hoàn thành |
+| **Ngày phát hành (Date)** | 2026-08-19 |
 | **Tác giả (Author)** | Nhóm Phát triển Backend (Senior Software Engineer) |
-| **Tài liệu Kiến trúc liên quan** | [ADD-004](file:///Users/phantom/Downloads/Intern/project/eap/docs/week4/architecture_design.md) |
+| **Tài liệu Kiến trúc liên quan** | [ADD-004](./ArchitectureDesign.md) |
 | **Mục đích & Phạm vi (Purpose & Scope)** | Tài liệu đặc tả thiết kế chi tiết cấp thấp phục vụ lập trình cho phân hệ **Số hóa & Tra cứu Tri thức Cơ bản (Basic RAG - Retrieval Layer)** của dự án VCC-EAP. Thiết kế tuân thủ các chỉ định và quyết định kiến trúc tại tài liệu ADD-004. Phạm vi thiết kế bao gồm cấu trúc lớp, sơ đồ tuần tự thực thi, cấu trúc cơ sở dữ liệu và kịch bản Flyway migration. |
 
 ### 1.1. Lịch sử Thay đổi (Revision History)
 | Phiên bản | Ngày | Tác giả | Mô tả Thay đổi / Ghi chú |
 | :--- | :--- | :--- | :--- |
 | 1.0 | 2026-08-07 | Nhóm Phát triển | Phiên bản đầu tiên. Đặc tả thiết kế chi tiết cho phân hệ Số hóa & Tra cứu. |
-| 1.1 | 2026-08-13 | Nhóm Phát triển | Chuẩn hóa theo thiết kế kiến trúc mới (ADD v1.1) và PRD v1.2: chuyển đổi phương pháp phân mảnh từ Phân mảnh Ngữ nghĩa sang Phân mảnh theo Đoạn văn (Paragraph Chunking), loại bỏ Matryoshka 768 chiều cho ranh giới câu, và tích hợp bộ lọc ngưỡng tương đồng tối thiểu. Đồng thời chuyển truy vấn SQL sang Named Parameters, tham số hóa BOARD ID (`:boardDeptId`), và hiển thị tiêu đề tài liệu gốc (`d.title`) chéo phòng ban qua Alias theo đúng PRD TC-4.3. |
+| 1.1 | 2026-08-13 | Nhóm Phát triển | Chuẩn hóa theo thiết kế kiến trúc mới (ADD v1.1) và PRD v1.2: chuyển đổi phương pháp phân mảnh từ Phân mảnh Ngữ nghĩa sang Phân mảnh theo Đoạn văn (Paragraph Chunking), loại bỏ Matryoshka 768 chiều cho ranh giới câu, và tích hợp bộ lọc tương đồng tối thiểu. Đồng thời chuyển truy vấn SQL sang Named Parameters, tham số hóa BOARD ID (`:boardDeptId`), và hiển thị tiêu đề tài liệu gốc (`d.title`) chéo phòng ban qua Alias theo đúng PRD TC-4.3. |
+| 1.2 | 2026-08-14 | Nhóm Phát triển | Chuẩn hóa theo thiết kế kiến trúc mới (ADD v1.2) và PRD v1.2: loại bỏ giới hạn kích thước tối đa/tối thiểu trong phân mảnh (max_tokens, min_tokens), thêm chỉ mục GIN cho metadata JSONB, bổ sung metadataFilter vào Search API, cập nhật truy vấn SQL tìm kiếm lọc siêu dữ liệu và loại bỏ Similarity Threshold. |
+| 1.3 | 2026-08-19 | Nhóm Phát triển | Cập nhật theo ADD v1.3 & PRD v1.3: Bổ sung LlmMetadataExtractorService, tích hợp trích xuất siêu dữ liệu động bằng LLM vào Retrieval Pipeline, cập nhật sequence diagram và component diagram, bổ sung cơ chế fallback/timeout, parallel execution (CompletableFuture), loại bỏ filteredUuids mechanism cũ và similarity threshold 0.55. |
+| 1.4 | 2026-08-21 | Nhóm Phát triển | Chuẩn hóa bản chốt 5 Key Metadata Filters, thiết lập 2 chỉ mục tối ưu (B-tree idx_meta_doc_type và GIN jsonb_path_ops idx_meta_gin), cập nhật System Prompt Engineering (tối ưu hóa prompt trả về full schema và bật JSON Mode để giảm latency), đơn giản hóa toán tử SQL @> và tích hợp logic ngắt sớm khi không có ứng viên khớp metadata. |
 
 ---
 
@@ -45,12 +48,14 @@ graph TD
     end
 
     subgraph ServiceLayer ["Tầng Service"]
-        RetrievalService["RetrievalService"]
-        DocumentDigitizationService["DocumentDigitizationService"]
-        TextExtractionService["TextExtractionService"]
-        ChunkingService["ChunkingService"]
+        RetrievalService["RetrievalService / RetrievalServiceImpl"]
+        WorkerExecutorImpl["WorkerExecutorImpl"]
+        DocumentChunkProcessorImpl["DocumentChunkProcessorImpl"]
+        DocumentTextExtractor["DocumentTextExtractor"]
+        ParagraphChunker["ParagraphChunker"]
         EmbeddingService["EmbeddingService"]
-        ChunkPersistenceService["ChunkPersistenceService"]
+        PgVectorSearchService["PgVectorSearchService"]
+        LlmMetadataExtractor["LlmMetadataExtractorService<br>(LLM API Client)"]
     end
 
     subgraph RepositoryLayer ["Tầng Repository"]
@@ -62,19 +67,24 @@ graph TD
         PostgresDB[("PostgreSQL + pgvector")]
     end
 
-    %% Flow: Search Path
-    SearchController -->|SearchRequest, AuthContext| RetrievalService
-    RetrievalService -->|String Query| EmbeddingService
-    RetrievalService -->|Vector, AuthContext| ChunkRepository
-    ChunkRepository -->|Raw SQL query| PostgresDB
+    subgraph ExternalServices ["Dịch vụ ngoài"]
+        LlmProvider["LLM API Provider (External)"]
+    end
 
-    %% Flow: Digitization Path (Week 4 Pipeline, triggered by Week 3 WorkerExecutor)
-    WorkerExecutorImpl["WorkerExecutorImpl (Week 3)"] -->|executeTask| DocumentDigitizationService
-    DocumentDigitizationService -->|fileReference| TextExtractionService
-    DocumentDigitizationService -->|Raw text| ChunkingService
-    DocumentDigitizationService -->|List of chunks| EmbeddingService
-    DocumentDigitizationService -->|Single Chunk + Vector| ChunkPersistenceService
-    ChunkPersistenceService -->|Save chunk in transaction| ChunkRepository
+    %% Flow: Search Path
+    SearchController -->|RagChatRequest, User| RetrievalService
+    RetrievalService -->|String Query| EmbeddingService
+    RetrievalService -->|String Query| LlmMetadataExtractor
+    LlmMetadataExtractor -->|HTTP/JSON API Call| LlmProvider
+    RetrievalService -->|SearchContext DTO| PgVectorSearchService
+    PgVectorSearchService -->|Raw SQL + pgvector| PostgresDB
+
+    %% Flow: Digitization Path
+    WorkerExecutorImpl -->|executeTask| DocumentChunkProcessorImpl
+    DocumentChunkProcessorImpl -->|Path filePath| DocumentTextExtractor
+    DocumentChunkProcessorImpl -->|Raw text| ParagraphChunker
+    DocumentChunkProcessorImpl -->|chunk content| EmbeddingService
+    DocumentChunkProcessorImpl -->|Chunk entity| ChunkRepository
     ChunkRepository -->|Insert Chunks & update checkpoints| PostgresDB
 ```
 
@@ -84,26 +94,38 @@ graph TD
 #### 2.2.1. Tầng Controller
 *   **`SearchController`**:
     *   Địa chỉ endpoint: `POST /api/v1/search`.
-    *   Trách nhiệm: Nhận truy vấn tìm kiếm ngữ nghĩa nghiệp vụ từ phía máy khách, xác thực đầu vào (`SearchRequest`), trích xuất thông tin người dùng đăng nhập hiện tại từ Spring Security để xây dựng `EapAuthorizationContext`.
-    *   Chặn hoàn toàn người dùng có vai trò `SYSTEM_ADMIN` bằng cách ném ra `403 Forbidden` (sử dụng `ErrorCode.ERR_FORBIDDEN_ROLE`).
+    *   Trách nhiệm: **Thin controller** — chỉ nhận `RagChatRequest` (field `message`), lấy `User currentUser` từ `@AuthenticationPrincipal`, gọi `RetrievalService.search()` và trả về `ApiResponse<RagChatResponse>`. Không chứa bất kỳ business logic hay kiểm tra phân quyền nào.
 
 #### 2.2.2. Tầng Service
-*   **`DocumentDigitizationService`**:
-    *   Trách nhiệm: Điều phối toàn bộ luồng số hóa văn bản nền (Digitization Pipeline) của tài liệu từ trạng thái `PROCESSING`. Lớp này sẽ được `WorkerExecutorImpl` (Tuần 3) gọi sau khi đã xác thực file và hash thành công.
-*   **`TextExtractionService`**:
-    *   Trách nhiệm: Đọc tệp vật lý gốc (PDF, DOCX, XLSX) thông qua `file_reference` và trích xuất chuỗi văn bản thô tiếng Việt (UTF-8). Tích hợp với `pdfbox`, `poi` và `tika` đã khai báo trong `pom.xml`.
-*   **`ChunkingService`**:
-    *   Trách nhiệm: Thực hiện phân mảnh văn bản theo đoạn văn (Paragraph Chunking). Tách văn bản thô dựa trên dấu ngắt đoạn tự nhiên (mặc định là `\n\n`), cắt cứng các đoạn văn bản dài vượt quá giới hạn tối đa tại các ranh giới câu, và áp dụng ràng buộc kích thước tối thiểu để gộp các mảnh dư thừa vào mảnh liền trước nhằm tránh phân mảnh vụn.
+*   **`WorkerExecutorImpl`** (điều phối tổng thể):
+    *   Trách nhiệm: Nhận task từ hàng đợi, xác thực hash file, tính tổng số chunks và điều phối vòng lặp gọi `DocumentChunkProcessorImpl` theo từng `chunkIndex`. Xử lý retry/skip từng chunk.
+*   **`DocumentChunkProcessorImpl`** (xử lý từng chunk):
+    *   Trách nhiệm: Điều phối luồng số hóa một chunk đơn lẻ: gọi `DocumentTextExtractor` trích xuất văn bản, `ParagraphChunker` phân mảnh, `EmbeddingService` sinh vector, `ChunkRepository` lưu kết quả.
+*   **`DocumentTextExtractor`** (interface) / **`DocumentTextExtractorImpl`**:
+    *   Trách nhiệm: Đọc tệp vật lý gốc (PDF, DOCX, XLSX, PPTX) và trích xuất chuỗi văn bản thô tiếng Việt (UTF-8). Sử dụng Apache Tika để phát hiện MIME type, PDFBox cho PDF, Apache POI cho DOCX/XLSX/PPTX. Hỗ trợ 2 overload: `extractText(MultipartFile)` và `extractText(Path)`.
+*   **`ParagraphChunker`** (interface):
+    *   Trách nhiệm: Phân mảnh văn bản theo đoạn văn tự nhiên (`\n\n`). Mỗi đoạn văn bản thành 1 chunk độc lập.
 *   **`EmbeddingService`**:
-    *   Trách nhiệm: Tải mô hình nhúng cục bộ BGE-M3 (ONNX) và sinh vector nhúng 1024 chiều cho chuỗi văn bản (in-process). Quản lý khởi tạo Singleton và cấu hình song song của ONNX Runtime session. Thực hiện kiểm chứng đầu ra luôn đạt 1024 chiều và L2-Normalize.
-*   **`ChunkPersistenceService`**:
-    *   Trách nhiệm: Lưu trữ bền vững theo lô (Batch Database Persistence) các mảnh văn bản nghiệp vụ, chỉ mục thứ tự (`chunk_index`), vector nhúng và siêu dữ liệu phiên bản mô hình vào cơ sở dữ liệu để tránh nghẽn kết nối và overhead mạng. Nếu việc ghi theo lô bị lỗi, hệ thống kích hoạt cơ chế fallback lưu từng chunk đơn lẻ để có thể bỏ qua (skip) các chunk bị lỗi nghiệp vụ cụ thể. Để đảm bảo cô lập lỗi ở cấp độ lô/chunk, phương thức lưu trữ của lớp này được đánh dấu `@Transactional(propagation = Propagation.REQUIRES_NEW)`.
-*   **`RetrievalService`**:
-    *   Trách nhiệm: Điều phối tiến trình tìm kiếm ngữ nghĩa. Nhận câu hỏi, gọi `EmbeddingService` sinh vector truy vấn, lấy dữ liệu phân quyền phòng ban của người dùng hiện tại từ `EapAuthorizationContext` và chuyển giao thông tin xuống `ChunkRepository` để thực thi truy vấn cơ sở dữ liệu.
+    *   Trách nhiệm: Tải mô hình BGE-M3 (ONNX) và sinh vector nhúng 1024 chiều (in-process). Quản lý Singleton ONNX Runtime session. Kiểm chứng 1024 chiều và L2-Normalize.
+*   **`RetrievalServiceImpl`**:
+    *   Trách nhiệm: Kiểm tra phân quyền (`SYSTEM_ADMIN` bị chặn 403). Kích hoạt song song sử dụng `CompletableFuture`:
+        *   (a) Gọi `LlmMetadataExtractorService.extractMetadata(query)` để trích xuất các cặp khóa-giá trị siêu dữ liệu dưới dạng JSON object hoặc `{}` (fallback nếu có lỗi/timeout).
+        *   (b) Gọi `EmbeddingService.embedText(query)` để sinh vector truy vấn 1024 chiều.
+        *   Kích hoạt cơ chế **Short-Circuit**:
+            *   Nếu `metadataFilter` rỗng hoặc null $\rightarrow$ trả về kết quả rỗng `[]` ("Không tìm thấy").
+            *   Nếu có `metadataFilter`, gọi `ChunkRepository.existsCandidateWithMetadata()` kiểm tra tập ứng viên khớp metadata + phân quyền. Nếu trả về `false` $\rightarrow$ ngắt sớm trả về kết quả rỗng `[]` ("Không tìm thấy").
+        *   Nếu có ứng viên phù hợp, đóng gói DTO nội bộ `SearchContext` (chứa `queryVector`, `metadataFilter`, `userDeptId`, `boardDeptId`) và gọi `VectorSearchService.searchWithAuth(context)`. Cuối cùng ánh xạ kết quả sang `RagChatResponse`.
+*   **`LlmMetadataExtractorService`** (interface) / **`LlmMetadataExtractorServiceImpl`**:
+    *   Trách nhiệm: Gửi câu hỏi người dùng kèm Prompt định nghĩa Metadata Schema tới LLM API Provider (Google Gemini / OpenAI-compatible HTTP REST Client). Nhận về JSON object chứa các cặp khóa-giá trị siêu dữ liệu được trích xuất tự động.
+    *   Cơ chế fallback: Giới hạn timeout tối đa 2000ms đối với search query. Nếu LLM trả về `{}` (empty JSON), timeout, hoặc bất kỳ lỗi kết nối/HTTP error nào, service bắt ngoại lệ, ghi log WARN, và trả về đối tượng Map rỗng `{}`.
+*   **`PgVectorSearchService`**:
+    *   Trách nhiệm: Thực thi các câu truy vấn tương tác với pgvector. Có method `searchWithAuth()` nhận `SearchContext` DTO và gọi `ChunkRepository.searchWithAuth()` để thực thi tìm kiếm vector kết hợp bộ lọc siêu dữ liệu và phân quyền tại database.
 
 #### 2.2.3. Tầng Repository
 *   **`ChunkRepository` (hoặc `ChunkRepositoryCustom`)**:
-    *   Trách nhiệm: Thực hiện các câu lệnh **SQL thô (Raw SQL)** tương tác với pgvector. Truy vấn lọc phân quyền phòng ban, Alias sharing, BOARD isolation và tìm kiếm vector tương đồng Cosine lân cận gần đúng (ANN) sử dụng chỉ mục HNSW trực tiếp trên cơ sở dữ liệu PostgreSQL. Map kết quả trả về thành các DTO nghiệp vụ sạch sẽ mà không thực hiện bất kỳ hoạt động post-filtering nào trên JVM.
+    *   Trách nhiệm: Thực hiện các câu lệnh **SQL thô (Raw SQL)** tương tác với pgvector.
+    *   `existsCandidateWithMetadata()`: Kiểm tra sự tồn tại của ít nhất 1 phân đoạn ứng viên khớp bộ lọc metadata JSONB và phân quyền tại cơ sở dữ liệu để phục vụ cơ chế ngắt sớm (Short-Circuit).
+    *   `searchWithAuth()`: Truy vấn tìm kiếm vector Cosine (`<=>`) lân cận gần đúng (ANN) kết hợp tiền lọc metadata (`@>`), cô lập phòng ban, Alias sharing và BOARD isolation trực tiếp trên cơ sở dữ liệu PostgreSQL. Map kết quả trả về thành các DTO `ChunkSearchResult` mà không thực hiện bất kỳ hoạt động post-filtering nào trên JVM.
 
 ---
 
@@ -113,113 +135,131 @@ graph TD
 ```mermaid
 sequenceDiagram
     autonumber
-    participant W as WorkerExecutor
-    participant DS as DocumentDigitizationService
-    participant TE as TextExtractionService
-    participant CS as ChunkingService
+    participant W as WorkerExecutorImpl
+    participant CP as DocumentChunkProcessorImpl
+    participant TE as DocumentTextExtractor
+    participant CS as ParagraphChunker
     participant ES as EmbeddingService
-    participant PS as ChunkPersistenceService
+    participant LLM as LlmMetadataExtractorService
     participant R as ChunkRepository
 
-    W->>DS: digitizeDocument(docId, workerId)
-    activate DS
-    
-    DS->>TE: extractText(fileReference)
+    W->>W: validateHash(filePath)
+    W->>TE: extractText(Path filePath)
     activate TE
-    TE-->>DS: String (Raw UTF-8 Text)
+    Note over TE: Detect MIME (Tika) → PDFBox/POI/UTF-8
+    TE-->>W: String (Raw UTF-8 Text)
     deactivate TE
-    
-    DS->>CS: splitDocument(rawText)
+
+    W->>CS: chunkText(rawText)
     activate CS
-    Note over CS: Phân mảnh theo đoạn văn (\n\n),<br/>cắt câu khi vượt max-tokens,<br/>gộp phần dư khi dưới min-tokens.
-    CS-->>DS: List<String> (Danh sách nội dung các mảnh văn bản)
+    Note over CS: Phân mảnh theo đoạn văn (\n\n)
+    CS-->>W: List<String> (Danh sách nội dung mảnh)
     deactivate CS
 
-    Note over DS: Chia danh sách mảnh thành các lô (batch) tối đa 128 chunks
-    
-    loop Cho mỗi lô chunks
-        DS->>ES: embedBatch(batchChunks)
-        activate ES
-        Note over ES: Gọi ONNX Runtime in-process sinh vector 1024-dim<br/>và thực hiện chuẩn hóa L2
-        ES-->>DS: List<float[]> (Danh sách vector nhúng)
-        deactivate ES
-    end
+    Note over W: Cập nhật total_chunks vào DB
 
-    Note over DS: Cập nhật total_chunks và last_completed_chunk = 0 vào DB
-    
-    loop Cho mỗi chunk từ k = lastCompleted + 1 đến totalChunks
-        DS->>PS: persistChunk(docId, k, content, embedding)
-        activate PS
-        Note over PS: Thực thi trong REQUIRES_NEW transaction<br/>Thử lại tối đa 3 lần nếu lỗi DB
-        PS->>R: insert chunk & update checkpoint
-        R-->>PS: success
-        PS-->>DS: success
-        deactivate PS
-        
+    loop Cho mỗi chunk k = lastCompleted+1 đến totalChunks
+        W->>CP: processChunk(docId, k)
+        activate CP
+        CP->>TE: extractText(Path filePath)
+        TE-->>CP: String (Raw Text)
+        CP->>CS: chunkText(rawText)
+        CS-->>CP: List<String>
+        CP->>ES: embedText(content[k])
+        activate ES
+        Note over ES: ONNX Runtime in-process, L2-Normalize
+        ES-->>CP: float[] (1024-dim)
+        deactivate ES
+        CP->>LLM: extractChunkMetadata(content[k])
+        activate LLM
+        Note over LLM: Gọi LLM API (Prompt Ingestion)<br/>Lọc bỏ các key rỗng
+        LLM-->>CP: Map<String, Object> (metadata)
+        deactivate LLM
+        CP->>R: save(Chunk)
+        R-->>CP: success
+        CP-->>W: success
+        deactivate CP
+
         alt Lưu trữ thành công
-            Note over DS: Tiếp tục chunk k+1
-        else Giao dịch lưu trữ lỗi sau 3 lần retry
-            Note over DS: SKIP chunk k này<br/>Ghi log cảnh báo và chỉ cập nhật checkpoint last_completed_chunk = k
+            Note over W: Tiếp tục chunk k+1
+        else Lỗi sau retry
+            Note over W: SKIP chunk k, ghi log WARN
         end
     end
-    
-    Note over DS: Hoàn tất toàn bộ chunks
-    DS->>W: markCompleted(docId)
-    deactivate DS
+
+    Note over W: Hoàn tất → markCompleted(docId)
 ```
 
 ---
 
 ### 2.4. Retrieval Pipeline (Đường ống Tra cứu ngữ nghĩa - RAG)
-Quy trình tiếp nhận yêu cầu tìm kiếm ngữ nghĩa, sinh vector truy vấn và thực hiện tìm kiếm kết hợp phân quyền trong hệ thống RAG diễn ra đồng bộ theo sơ đồ tuần tự dưới đây:
+Quy trình tiếp nhận yêu cầu tìm kiếm ngữ nghĩa, gọi LLM trích xuất siêu dữ liệu, sinh vector câu hỏi song song và tìm kiếm tương đồng vector kết hợp tiền lọc tại DB:
 
 ```mermaid
 sequenceDiagram
     autonumber
     participant C as Client
     participant SC as SearchController
-    participant RS as RetrievalService
+    participant RS as RetrievalServiceImpl
+    participant LLM as LlmMetadataExtractorService
     participant ES as EmbeddingService
-    participant R as ChunkRepository
+    participant CR as ChunkRepository
     participant DB as PostgreSQL + pgvector
 
-    C->>SC: POST /api/v1/search (query, limit)
+    C->>SC: POST /api/v1/search { "message": "..." }
     activate SC
-    
-    Note over SC: Xác thực đầu vào và vai trò người dùng<br/>Nếu là SYSTEM_ADMIN ném lỗi 403
-    
-    SC->>RS: search(query, limit, authContext)
+    SC->>RS: search(RagChatRequest, User currentUser)
     activate RS
-    
-    RS->>ES: embedQuery(query)
-    activate ES
-    Note over ES: Tokenize và gọi ONNX Runtime in-process<br/>Chuẩn hóa L2 vector 1024 chiều
-    ES-->>RS: float[] queryVector (1024-dim)
-    deactivate ES
-    
-    RS->>R: findTopSimilarChunks(queryVector, limit, userDeptId)
-    activate R
-    
-    Note over R: Xây dựng câu truy vấn SQL thô tích hợp:<br/>1. Tìm tương đồng HNSW (toán tử <=> )<br/>2. Lọc cô lập phòng ban & BOARD<br/>3. Phân giải tên hiển thị qua Alias
-    
-    R->>DB: Thực thi truy vấn SQL thô
-    activate DB
-    DB-->>R: ResultSet (chunkId, content, displayTitle, score...)
-    deactivate DB
-    
-    Note over R: Map ResultSet sang List<SearchResultItem> DTO
-    R-->>RS: List<SearchResultItem>
-    deactivate R
-    
-    RS-->>SC: SearchResponse
+
+    Note over RS: [1] Kiểm tra phân quyền<br/>SYSTEM_ADMIN → 403 ERR_FORBIDDEN_ROLE
+
+    Note over RS,ES: [2] Kích hoạt song song (CompletableFuture)
+    par LLM Metadata Extraction
+        RS->>LLM: extractMetadata(message)
+        activate LLM
+        Note over LLM: Gọi LLM API (timeout 2000ms)<br/>Parse JSON → Map<String,Object>
+        LLM-->>RS: llmMetadata hoặc {} (fallback)
+        deactivate LLM
+    and Query Embedding
+        RS->>ES: embedText(message)
+        activate ES
+        Note over ES: ONNX Runtime in-process<br/>BGE-M3 → float[1024] L2-Normalized
+        ES-->>RS: float[] queryVector
+        deactivate ES
+    end
+
+    Note over RS: [3] Short-Circuit Check: metadataFilter & Candidate existence
+    alt metadataFilter rỗng {}
+        RS-->>SC: RagChatResponse("Không tìm thấy...", [])
+    else Có metadataFilter
+        RS->>CR: existsCandidateWithMetadata(metadataFilter, userDeptId, boardDeptId)
+        activate CR
+        CR->>DB: SELECT EXISTS (WHERE metadata @> filter AND auth)
+        DB-->>CR: boolean hasCandidate
+        CR-->>RS: hasCandidate
+        deactivate CR
+        opt hasCandidate == false
+            RS-->>SC: RagChatResponse("Không tìm thấy...", [])
+        end
+    end
+
+    Note over RS: [4] Đóng gói thành SearchContext DTO nội bộ
+
+    RS->>CR: searchWithAuth(SearchContext)
+    activate CR
+    Note over CR: SQL: WHERE + metadata@> + dept isolation<br/>+ BOARD isolation + COMPLETED status<br/>ORDER BY cosine <=> ASC LIMIT K
+    CR->>DB: Raw SQL + pgvector
+    DB-->>CR: ResultSet
+    CR-->>RS: List<ChunkSearchResult>
+    deactivate CR
+
+    RS-->>SC: RagChatResponse(response, chunks)
     deactivate RS
-    
-    SC-->>C: 200 OK (SearchResponse)
+    SC-->>C: 200 OK ApiResponse<RagChatResponse>
     deactivate SC
 ```
 
 ---
-
 
 ## 3. DATA DESIGN & DATABASE SCHEMA (THIẾT KẾ DỮ LIỆU & CƠ SỞ DỮ LIỆU)
 
@@ -282,6 +322,7 @@ erDiagram
         INT retry_count "Số lần thử lại số hóa"
         INT last_completed_chunk "Mảnh cuối cùng hoàn tất số hóa"
         INT total_chunks "Tổng số mảnh của tài liệu"
+        INT skipped_chunks_count "Số lượng mảnh bị bỏ qua do lỗi"
     }
 
     tbl_chunks {
@@ -290,6 +331,7 @@ erDiagram
         INT chunk_index "Chỉ số phân mảnh (0..N-1)"
         TEXT content "Nội dung văn bản thô của phân mảnh"
         vector-1024 embedding "Vector nhúng 1024 chiều (pgvector)"
+        JSONB metadata "Siêu dữ liệu JSONB chứa các trường nội dung chính"
         TIMESTAMP created_at "Thời điểm tạo"
     }
 
@@ -306,48 +348,80 @@ erDiagram
 *   `chunk_index`: Vị trí tương đối của phân mảnh trong tài liệu gốc. Ràng buộc `UNIQUE(document_id, chunk_index)` đảm bảo tính toàn vẹn.
 *   `content`: Nội dung văn bản của mảnh được tách bởi bộ phân mảnh ngữ nghĩa.
 *   `embedding`: Vector nhúng 1024 chiều được tối ưu hóa qua HNSW Index (`vector_cosine_ops`).
+*   `metadata`: Siêu dữ liệu dưới dạng JSONB lưu trữ các thuộc tính chuẩn hóa phục vụ tiền lọc cấp cơ sở dữ liệu và đính kèm vị trí trích dẫn tài liệu. Các key không có giá trị sẽ bị lược bỏ hoàn toàn khỏi đối tượng JSON để tối ưu hóa không gian lưu trữ và kích thước chỉ mục:
+    *   **Nhóm Phục vụ Tiền lọc (Pre-filtering Keys)**:
+        *   `doc_type`: `String Enum` - Loại tài liệu (`guide`, `regulation`, `analysis`, `description`, `transaction`, `communication`, `education`, `news`, `literature`, `other`) dạng chữ thường.
+        *   `topics`: `Array of String Enum` - Chủ đề lớn cốt lõi dạng Enum chữ thường (`hr_policy`, `compensation_benefits`, `finance_accounting`, `legal_compliance`, `it_technical`, `sales_marketing`, `operation_process`, `admin_facilities`, `board_direction`, `general_info`) — thay thế cho `chunk_role` cũ.
+        *   `entities`: `Array of String` - Thực thể & khái niệm nghiệp vụ dạng `type:value` chữ thường (`org:`, `dept:`, `person:`, `product:`, `law:`, `standard:`, `tech:`, `loc:`, `concept:`). Trong đó `concept:` bóc tách chi tiết các khái niệm, chế độ, phụ cấp, quyền lợi chuyên môn. *(Đã loại bỏ `keywords`; thay vào đó trường `entities` được mở rộng chi tiết bao gồm cả nhóm khái niệm `concept:`)*.
+        *   `time_refs`: `Array of String` - Mốc thời gian liên quan được chuẩn hóa (`yyyy`, `yyyy-qn`, `yyyy-mm`, `yyyy-mm-dd`, `2 năm`, `đầu năm`, `cuối quý`) dạng chữ thường.
+    *   **Nhóm Phục vụ Trích dẫn Vị trí (Display Citation Keys)**:
+        *   `page_number`: `Integer` - Số trang gốc trong tài liệu PDF.
+        *   `citation_headings`: `Array of String` - Mảng tiêu đề phân cấp gốc nguyên bản của phân đoạn (giữ nguyên kiểu chữ nguyên bản - bao gồm chữ hoa như trong tài liệu gốc, ví dụ: `["Chương I: Quy định chung", "Mục 2: Lương cơ bản"]`).
 *   `created_at`: Thời điểm lưu trữ phân đoạn.
 
 ---
 
 ### 3.2. Database Migration Design (Thiết kế Di cư Flyway)
-Tạo tệp migration mới `V14__create_chunks_table.sql` trong thư mục `src/main/resources/db/migration/`:
+Cơ sở dữ liệu của Week 4 sử dụng 3 tệp migration trong thư mục `src/main/resources/db/migration/`:
 
+#### 1. Migration `V14__add_vector_and_chunks_table.sql`:
 ```sql
--- Migration V14: Kích hoạt pgvector, tạo bảng tbl_chunks và thiết lập các chỉ mục tối ưu
+-- Migration V14: Enable pgvector extension and create tbl_chunks table with metadata JSONB column
 CREATE EXTENSION IF NOT EXISTS vector;
 
--- 1. Tạo bảng tbl_chunks lưu trữ phân đoạn văn bản và vector tương ứng
+-- 1. Create tbl_chunks table
 CREATE TABLE tbl_chunks (
     id UUID PRIMARY KEY,
     document_id UUID NOT NULL,
     chunk_index INT NOT NULL,
     content TEXT NOT NULL,
-    embedding vector(1024), -- Cột vector nhúng cố định 1024 chiều
-    metadata JSONB DEFAULT '{}'::jsonb NOT NULL, -- Siêu dữ liệu ngữ cảnh (page_number, section_header, token_count)
+    embedding vector(1024),
+    metadata JSONB DEFAULT '{}'::jsonb NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
     CONSTRAINT fk_chunks_document FOREIGN KEY (document_id) REFERENCES tbl_documents(id) ON DELETE CASCADE,
-    CONSTRAINT uq_document_chunk UNIQUE (document_id, chunk_index) -- Đảm bảo không trùng lặp vị trí chunk của tài liệu
+    CONSTRAINT uq_document_chunk UNIQUE (document_id, chunk_index)
 );
 
--- 2. Tạo index cho khoá ngoại document_id phục vụ xoá cascade/truy vấn nhanh
+-- 2. Foreign key index for document_id
 CREATE INDEX idx_chunks_document_id ON tbl_chunks(document_id);
 
--- 3. Tạo index HNSW hỗ trợ tìm kiếm lân cận gần đúng sử dụng độ tương đồng Cosine
--- m = 16 (số kết nối tối đa mỗi node), ef_construction = 64 (kích thước tập ứng viên khi dựng đồ thị)
+-- 3. HNSW index for vector cosine similarity
 CREATE INDEX idx_chunks_embedding_hnsw ON tbl_chunks USING hnsw (embedding vector_cosine_ops)
 WITH (m = 16, ef_construction = 64);
 
--- 4. Tạo index trên tbl_documents để tối ưu hoá tìm kiếm phân giải Alias chéo phòng ban
-CREATE INDEX idx_documents_parent_id ON tbl_documents(parent_id)
+-- 4. GIN Index on metadata JSONB column
+CREATE INDEX idx_chunks_metadata_gin ON tbl_chunks USING gin (metadata);
+
+-- 5. Index on tbl_documents parent_id for alias resolution optimization
+CREATE INDEX IF NOT EXISTS idx_documents_parent_id ON tbl_documents(parent_id)
 WHERE parent_id IS NOT NULL AND deleted_at IS NULL;
+```
+
+#### 2. Migration `V15__add_skipped_chunks_count.sql`:
+```sql
+-- Migration V15: Add skipped_chunks_count column to tbl_documents
+ALTER TABLE tbl_documents ADD COLUMN skipped_chunks_count INT DEFAULT 0 NOT NULL;
+```
+
+#### 3. Migration `V16__add_metadata_jsonb_path_ops_indexes.sql`:
+```sql
+-- Migration V16: Thay thế GIN index mặc định bằng jsonb_path_ops để hỗ trợ toán tử @>
+-- và thêm B-tree index cho doc_type để tối ưu single-value filter
+
+-- 1. Xóa GIN index cũ (dùng ops mặc định, không hỗ trợ tối ưu @>)
+DROP INDEX IF EXISTS idx_chunks_metadata_gin;
+
+-- 2. B-tree index cho single-value key doc_type (hỗ trợ lọc nhanh bằng =)
+CREATE INDEX idx_meta_doc_type ON tbl_chunks ((metadata->>'doc_type'));
+
+-- 3. GIN jsonb_path_ops index cho tất cả array keys còn lại (topics, entities, time_refs)
+CREATE INDEX idx_meta_gin ON tbl_chunks USING GIN (metadata jsonb_path_ops);
 ```
 
 ---
 
 ### 3.3. HNSW Vector Index Design (Thiết kế Index Vector)
 Để đáp ứng mục tiêu hiệu năng tìm kiếm lân cận gần đúng (ANN) dưới 500ms đối với số lượng bản ghi lớn, chỉ mục HNSW được thiết lập trên cột vector nhúng:
-
 *   **Distance Operator**: Sử dụng toán tử `<=>` đại diện cho khoảng cách Cosine. Chỉ mục tương ứng là `vector_cosine_ops`.
 *   **Cú pháp tạo chỉ mục**:
     ```sql
@@ -363,36 +437,22 @@ WHERE parent_id IS NOT NULL AND deleted_at IS NULL;
 
 ---
 
----
-
 ## 4. DETAILED MODULE DESIGN (THIẾT KẾ CHI TIẾT CÁC MODULE)
 
 ### 4.1. Chunker Module & Pseudocode (Thiết kế Phân mảnh & Mã giả)
-Giải thuật phân mảnh văn bản sử dụng giải pháp **Phân mảnh theo Đoạn văn kết hợp xử lý tránh phân mảnh vụn (Paragraph Chunking with Min Chunk Size constraint)** được triển khai qua `ChunkingService`:
+Giải thuật phân mảnh văn bản sử dụng giải pháp **Phân mảnh theo Đoạn văn Tự nhiên Đơn giản (Simple Paragraph Chunking)** được triển khai qua `ParagraphChunker` (interface) / `ParagraphChunkerImpl`:
 
 #### 4.1.1. Các tham số cấu hình
-Các tham số phân mảnh được thiết kế dưới dạng cấu hình hệ thống động để có thể tinh chỉnh linh hoạt tại runtime không cần khởi động lại ứng dụng:
+Các tham số phân mảnh được thiết kế dưới dạng cấu hình hệ thống:
 *   `eap.chunking.paragraph-separator`: Ký tự ngắt đoạn văn bản tự nhiên (Mặc định: `\n\n`).
-*   `eap.chunking.max-tokens`: Giới hạn kích thước tối đa của mỗi mảnh (Mặc định: 1000 tokens).
-*   `eap.chunking.min-tokens`: Giới hạn kích thước tối thiểu của mỗi mảnh (Mặc định: 100 tokens).
-*   `eap.chunking.overflow-max-tokens`: Kích thước tràn tối đa của chunk liền trước khi gộp phần dư (Mặc định: 1100 tokens).
 
 #### 4.1.2. Giải thuật phân mảnh chi tiết
 1.  **Bước 1: Chuẩn hoá văn bản & Phân tách tự nhiên**:
     *   Chuyển đổi văn bản thô sang Unicode chuẩn **NFC** và chuẩn hóa khoảng trắng thừa.
     *   Tách văn bản thô thành danh sách các đoạn văn bản tự nhiên dựa trên ký tự ngắt đoạn cấu hình trong `eap.chunking.paragraph-separator` (mặc định là dấu xuống dòng kép `\n\n`).
-2.  **Bước 2: Duyệt từng đoạn và kiểm tra kích thước (Max Tokens Constraint)**:
-    *   Duyệt qua danh sách các đoạn văn bản tự nhiên vừa phân tách. Với mỗi đoạn, tính toán số lượng token.
-    *   Nếu độ dài (tính bằng số lượng token) của đoạn văn $\le T_{\max}$ (`eap.chunking.max-tokens`), đoạn văn này được lưu trữ trực tiếp thành 1 chunk độc lập.
-3.  **Bước 3: Cắt cứng tại câu khi vượt quá giới hạn (Hard Split)**:
-    *   Nếu đoạn văn tự nhiên có độ dài $> T_{\max}$ tokens, tiến hành phân rã đoạn văn đó thành danh sách các câu tiếng Việt (dựa trên các dấu câu ngắt câu `.`, `?`, `!`).
-    *   Thực hiện gom nhóm các câu từ đầu đoạn văn cho đến khi tổng số token đạt sát nút giới hạn $T_{\max}$. Điểm ngắt sẽ nằm tại ranh giới câu gần nhất không làm vượt quá $T_{\max}$.
-    *   Hệ thống không sử dụng tính toán vector tương đồng giữa các câu in-memory và không áp dụng cơ chế overlap (overlap = 0) giữa các chunk khi ngắt.
-4.  **Bước 4: Tránh phân mảnh vụn (Min Chunk Size Constraint)**:
-    *   Khi cắt cứng, nếu phần dư (residual) của câu còn lại ở cuối đoạn văn có kích thước nhỏ hơn giới hạn tối thiểu $T_{\min}$ (`eap.chunking.min-tokens`), hệ thống sẽ thực hiện:
-        *   Gộp phần dư này vào chunk liền trước, chấp nhận kích thước của chunk liền trước vượt quá $T_{\max}$ một chút nhưng không được phép vượt quá giới hạn tràn tối đa $T_{\text{overflow\_max}}$ (`eap.chunking.overflow-max-tokens` - mặc định là 1100 tokens).
-        *   Trường hợp nếu gộp vào làm vượt quá $T_{\text{overflow\_max}}$, hệ thống thực hiện phân bổ lại điểm cắt tại các ranh giới câu gần đó sao cho độ dài của chunk trước và chunk sau tương đối cân bằng và đều lớn hơn $T_{\min}$.
-5.  **Bước 5: Tính lũy đẳng (Idempotency)**:
+2.  **Bước 2: Tạo Chunk**:
+    *   Mỗi đoạn văn bản tự nhiên sau khi ngắt và loại bỏ khoảng trắng thừa ở hai đầu sẽ được lưu trữ trực tiếp thành 1 chunk độc lập, không áp dụng bất kỳ giới hạn token hay ranh giới câu nào khác.
+3.  **Bước 3: Tính lũy đẳng (Idempotency)**:
     *   Quy trình phân mảnh đảm bảo tính xác định (deterministic). Khi số hóa lại cùng một tài liệu, các chunk được tạo ra sẽ trùng khớp hoàn toàn, đảm bảo ghi đè/cập nhật chính xác lên dữ liệu cũ dựa trên khoá duy nhất `uq_document_chunk (document_id, chunk_index)`.
 
 ---
@@ -427,7 +487,7 @@ Tích hợp in-process mô hình nhúng **BGE-M3** thông qua thư viện **ONNX
     5.  Trích xuất tensor đầu ra (từ khoá ngõ ra: `sentence_embedding` hoặc trích xuất biểu diễn CLS token từ `last_hidden_state`).
     6.  **Kiểm chứng Kích thước (Fail-fast Dimension Validation)**:
         *   Kiểm tra kích thước của mảng `float[]` nhận được.
-        *   Nếu độ dài mảng $\neq 1024$, lập tức ném ra ngoại lệ `IllegalStateException("Kích thước vector không hợp lệ: " + length)` để ngăn chặn việc ghi dữ liệu hỏng xuống DB. Nghiêm cấm việc tự ý pad thêm số 0 hoặc cắt ngắn vector.
+        *   If độ dài mảng $\neq 1024$, lập tức ném ra ngoại lệ `IllegalStateException("Kích thước vector không hợp lệ: " + length)` để ngăn chặn việc ghi dữ liệu hỏng xuống DB. Nghiêm cấm việc tự ý pad thêm số 0 hoặc cắt ngắn vector.
     7.  **L2-Normalization**:
         *   Để bảo đảm độ chính xác của phép so khớp Cosine trực tiếp tại SQL, vector nhúng phải được chuẩn hoá L2 trước khi lưu:
             $$\vec{v}_{\text{norm}} = \frac{\vec{v}}{\sqrt{\sum_{i=1}^{1024} v_i^2}}$$
@@ -448,7 +508,7 @@ Do vector nhúng của câu hỏi (Query Embedding) và mảnh văn bản (Chunk
 ### 4.4. Digitization Retry / Skip Design (Thiết kế Thử lại & Bỏ qua)
 Trong quá trình số hóa một tài liệu, để đảm bảo tính bền vững của đường ống xử lý, các lỗi xảy ra khi lưu trữ hoặc ghi nhận từng mảnh nhỏ (chunk) sẽ được xử lý cô lập mà không làm hỏng tiến trình chung của tài liệu:
 
-```
+```text
                           [Bắt đầu lưu trữ Chunk k]
                                      │
                                      ▼
@@ -485,7 +545,6 @@ Trong quá trình số hóa một tài liệu, để đảm bảo tính bền v�
 
 ### 4.5. Transaction & Persistence Design (Thiết kế Lưu trữ & Giao dịch)
 Để tuân thủ bất biến kiến trúc "Các mảnh thành công phải được giữ lại kể cả khi các mảnh sau bị lỗi", các giao dịch ghi dữ liệu được thiết kế như sau:
-
 *   **Giao dịch cấp độ mảnh (Chunk-level Transaction)**:
     Phương thức `persistChunk(...)` của `ChunkPersistenceService` sẽ chịu trách nhiệm ghi dữ liệu mảnh văn bản vào bảng `tbl_chunks` và cập nhật cột `last_completed_chunk = k` trong bảng `tbl_documents` cho cùng một kết nối. Phương thức này bắt buộc phải được khai báo:
     ```java
@@ -496,7 +555,6 @@ Trong quá trình số hóa một tài liệu, để đảm bảo tính bền v�
     }
     ```
     *Ý nghĩa*: Việc sử dụng `REQUIRES_NEW` đảm bảo Spring sẽ mở một database transaction độc lập cho mảnh hiện tại và commit ngay lập tức khi kết thúc phương thức. Nếu các mảnh tiếp theo gặp lỗi, dữ liệu của mảnh này đã được lưu vĩnh viễn và không bị rollback.
-
 *   **Giao dịch hoàn tất tài liệu (Document Finalization)**:
     Khi xử lý xong toàn bộ các mảnh văn bản, một giao dịch độc lập sẽ thực hiện cập nhật trạng thái tài liệu từ `PROCESSING` sang `COMPLETED`, đồng thời giải phóng `worker_id` về `NULL` trong bảng `tbl_documents`.
 
@@ -504,7 +562,6 @@ Trong quá trình số hóa một tài liệu, để đảm bảo tính bền v�
 
 ### 4.6. Idempotency & Crash Recovery (Tính Khả trùng & Tự Phục hồi)
 Để tích hợp tương thích với cơ chế tự phục hồi tác vụ dở dang của Tuần 3 khi máy chủ ứng dụng khởi động lại, tầng Số hóa Tuần 4 thiết lập cơ chế chạy lại an toàn (Idempotency):
-
 *   **Kịch bản sự cố**: Server ứng dụng bị tắt đột ngột khi đang thực hiện số hóa tài liệu A tại mảnh thứ 50 (trên tổng số 100 mảnh). 50 mảnh đầu tiên đã được commit thành công vào `tbl_chunks`, và `last_completed_chunk` của tài liệu A đang lưu giá trị 50 trong DB.
 *   **Tiến trình phục hồi**:
     1. Khi server boot lại, Listener tự phục hồi (Tuần 3) phát hiện tài liệu A bị kẹt ở trạng thái `PROCESSING` và chuyển trạng thái của nó về `READY` kèm tăng số lần thử lại (`retry_count`).
@@ -519,13 +576,103 @@ Trong quá trình số hóa một tài liệu, để đảm bảo tính bền v�
 
 ### 4.7. Retrieval Engine (Thiết kế Phân hệ Tra cứu)
 Quy trình tìm kiếm tương đồng ngữ nghĩa thực hiện chuyển đổi câu hỏi tự nhiên của người dùng và đối sánh trực tiếp trong cơ sở dữ liệu:
-
-1.  **Tiếp nhận đầu vào**: API nhận chuỗi câu hỏi `query` từ người dùng nghiệp vụ.
-2.  **Sinh vector truy vấn**: Gọi `EmbeddingService` nhúng câu hỏi thu được vector truy vấn $\vec{v}_{\text{query}} \in \mathbb{R}^{1024}$. Vector này bắt buộc phải được chuẩn hoá L2.
-3.  **Lọc phân quyền trực tiếp tại SQL**: Chuyển giao vector truy vấn và `EapAuthorizationContext` xuống tầng cơ sở dữ liệu để thực hiện tìm kiếm tương đồng Cosine, lọc phân quyền đồng thời và sắp xếp.
-4.  **Tối ưu số lượng**: Cơ sở dữ liệu giới hạn trả về tối đa Top-3 bản ghi phù hợp nhất.
+1.  **Tiếp nhận đầu vào**: API nhận chuỗi câu hỏi `query` từ người dùng nghiệp vụ (tương ứng với `message` trong `RagChatRequest`).
+2.  **Xử lý song song (Parallel execution)**:
+    *   **2a. Trích xuất siêu dữ liệu bằng LLM**: Gọi `LlmMetadataExtractorService.extractMetadata(query)` để lấy JSON object siêu dữ liệu từ câu hỏi. Nếu LLM lỗi hoặc timeout 2000ms, tự động fallback trả về `{}`.
+    *   **2b. Sinh vector truy vấn**: Gọi `EmbeddingService` nhúng câu hỏi thu được vector truy vấn $\vec{v}_{\text{query}} \in \mathbb{R}^{1024}$. Vector này bắt buộc phải được chuẩn hoá L2.
+3.  **Đóng gói Context**: Đóng gói các thuộc tính trên vào DTO nội bộ `SearchContext` bao gồm `queryVector`, `metadataFilter` (JSON từ LLM) và `userDeptId`.
+4.  **Lọc phân quyền trực tiếp tại SQL**: Chuyển giao `SearchContext` xuống tầng cơ sở dữ liệu để thực hiện tìm kiếm tương đồng Cosine, lọc phân quyền và lọc siêu dữ liệu đồng thời.
+5.  **Tối ưu số lượng**: Cơ sở dữ liệu giới hạn trả về tối đa Top-3 bản ghi phù hợp nhất.
 
 ---
+
+### 4.8. LLM Metadata Extractor Design (Thiết kế Trích xuất Siêu dữ liệu bằng LLM)
+
+#### 4.8.1. Trách nhiệm & Thiết kế Service
+Lớp `LlmMetadataExtractorServiceImpl` đóng vai trò là REST Client kết nối với LLM API Provider (Google Gemini / OpenAI-compatible) để tự động trích xuất các thuộc tính siêu dữ liệu. Giao diện dịch vụ hỗ trợ hai phương thức:
+*   `extractMetadata(String question)`: Trích xuất tiêu chí lọc từ câu hỏi của người dùng tại thời điểm truy vấn (Query-time).
+*   `extractChunkMetadata(String chunkContent)`: Trích xuất các thuộc tính siêu dữ liệu thực tế của một chunk văn bản tại thời điểm số hóa (Ingestion-time).
+
+Giao diện lớp dịch vụ được đặc tả như sau:
+```java
+public interface LlmMetadataExtractorService {
+    Map<String, Object> extractMetadata(String query);
+    Map<String, Object> extractChunkMetadata(String chunkContent);
+}
+```
+
+#### 4.8.2. Prompt Engineering & System Prompt Templates
+Dịch vụ trích xuất siêu dữ liệu được phân định thành 2 System Prompt Templates riêng biệt:
+
+1. **System Prompt Trích xuất Chunk (Chunk Metadata System Prompt - Ingestion-time)**:
+   LLM trích xuất đồng thời toàn bộ 4 nhóm thuộc tính nội dung (`doc_type`, `topics`, `entities`, `time_refs`) từ CẢ NỘI DUNG THÂN BÀI VÀ CẢ BỐI CẢNH TIÊU ĐỀ (`Citation Headings Stack`) trong 1 cuộc gọi API duy nhất. Giá trị các thực thể (`entities`) phải siêu ngắn gọn súc tích (1-3 từ cốt lõi):
+   ```text
+   Bạn là bộ trích xuất metadata cho hệ thống RAG doanh nghiệp. Nhiệm vụ: đọc NỘI DUNG THÂN BÀI CHUNK và BỐI CẢNH TIÊU ĐỀ (Citation Headings) để trích xuất chi tiết các thuộc tính metadata. Trả về DUY NHẤT một object JSON theo đúng schema bên dưới. Không giải thích, không markdown, không backtick, không thêm text nào khác ngoài JSON.
+
+   ## SCHEMA
+   {
+     "doc_type": "string enum (lowercase)",
+     "topics": ["string enum (lowercase)", ...],
+     "entities": ["type:value (lowercase)", ...],
+     "time_refs": ["string (lowercase)", ...]
+   }
+
+   ## QUY TẮC NGUYÊN TẮC TRÍCH XUẤT
+   - BẮT BUỘC phân tích và trích xuất các thực thể/khái niệm từ CẢ NỘI DUNG THÂN BÀI VÀ CẢ BỐI CẢNH TIÊU ĐỀ (Citation Headings Stack).
+   - TẤT CẢ CÁC VALUE TRONG METADATA PHẢI VIẾT BẰNG CHỮ THƯỜNG (LOWERCASE), NGẮN GỌN SÚC TÍCH (1-3 TỪ CỐT LÕI).
+   ```
+
+2. **System Prompt Trích xuất Bộ lọc Câu hỏi (Query Intent System Prompt - Query-time)**:
+   ```text
+   Bạn là bộ phân tích Intent câu hỏi cho hệ thống RAG doanh nghiệp. Nhiệm vụ: Trích xuất chính xác JSON Metadata Filter từ câu hỏi người dùng để thực hiện tiền lọc (metadata pre-filtering) cơ sở dữ liệu.
+   Trả về DUY NHẤT một object JSON theo đúng schema bên dưới. Không giải thích, không markdown, không backtick, không thêm bất kỳ văn bản nào khác ngoài JSON.
+
+   ## SCHEMA
+   {
+     "doc_type": "string enum (lowercase)",
+     "topics": ["string enum (lowercase)", ...],
+     "entities": ["type:value (lowercase)", ...],
+     "time_refs": ["string (lowercase)", ...]
+   }
+
+   ## QUY TẮC ĐẦU RA
+   Trả về đầy đủ các key trong SCHEMA (doc_type, topics, entities, time_refs). TẤT CẢ CÁC VALUE PHẢI VIẾT BẰNG CHỮ THƯỜNG (LOWERCASE), NGẮN GỌN SÚC TÍCH (1-3 TỪ).
+   ```
+
+**Chỉ thị trích xuất và tối ưu hóa (Full Schema & Backend Filtering rule)**:
+Thay vì yêu cầu LLM thực hiện so khớp và tự động xóa bỏ (omit) các key rỗng (làm tăng số bước suy luận của mô hình và dễ lỗi cú pháp JSON), thiết kế tối ưu mới chuyển giao trách nhiệm này cho Backend.
+* **LLM**: Luôn trả về đầy đủ các key trong schema. Nếu trường nào không có thông tin thì để giá trị mặc định là mảng rỗng `[]` hoặc chuỗi rỗng `""`. Điều này giúp LLM sinh token theo định dạng cố định cực kỳ nhanh và ổn định.
+* **Backend**: Sử dụng hàm `filterOmittedKeys()` để tự động loại bỏ các thuộc tính trống trước khi lưu hoặc lọc cơ sở dữ liệu. nếu không nhận diện được bất kỳ siêu dữ liệu nào, LLM trả về đối tượng với các trường giá trị rỗng và được Backend làm sạch thành đối tượng rỗng `{}`.
+
+Để phòng ngừa trường hợp LLM trả về không đúng chỉ thị, mã nguồn Backend tự động lọc sạch kết quả trước khi xử lý tiếp:
+```java
+private Map<String, Object> filterOmittedKeys(Map<String, Object> rawJsonMap) {
+    if (rawJsonMap == null) return Collections.emptyMap();
+    return rawJsonMap.entrySet().stream()
+        .filter(e -> e.getValue() != null)
+        .filter(e -> !(e.getValue() instanceof String && ((String) e.getValue()).trim().isEmpty()))
+        .filter(e -> !(e.getValue() instanceof Collection && ((Collection<?>) e.getValue()).isEmpty()))
+        .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+}
+```
+
+#### 4.8.2. Parallel Execution (CompletableFuture)
+Việc gọi LLM API để trích xuất siêu dữ liệu và gọi ONNX Runtime sinh vector nhúng câu hỏi (Query Embedding) được thực hiện song song để giảm thiểu tối đa độ trễ phản hồi của hệ thống:
+```java
+CompletableFuture<Map<String, Object>> llmFuture = CompletableFuture.supplyAsync(
+    () -> llmMetadataExtractorService.extractMetadata(message), taskExecutor);
+CompletableFuture<float[]> embedFuture = CompletableFuture.supplyAsync(
+    () -> embeddingService.embedText(message), taskExecutor);
+
+CompletableFuture.allOf(llmFuture, embedFuture).join();
+Map<String, Object> metadataFilter = llmFuture.getNow(Collections.emptyMap());
+float[] queryVector = embedFuture.getNow(null);
+```
+
+#### 4.8.3. Cơ chế Fallback & Exception Policy
+Để bảo đảm hệ thống tra cứu hoạt động ổn định và liên tục (High Availability), luồng trích xuất siêu dữ liệu qua LLM tuân thủ chặt chẽ các quy tắc sau:
+- **Trích xuất siêu dữ liệu rỗng (Empty Metadata)**: Nếu LLM không nhận diện được siêu dữ liệu nào từ câu hỏi (trả về đối tượng JSON rỗng `{}`), hệ thống tự động bỏ qua bước tiền lọc siêu dữ liệu động.
+- **Lỗi hệ thống hoặc Timeout (API Failure/Timeout)**: Cuộc gọi LLM API được giới hạn timeout tối đa là 2000ms. Trường hợp xảy ra lỗi kết nối mạng, Rate limit, HTTP 5xx, hoặc timeout vượt quá 2000ms, hệ thống bắt (catch) ngoại lệ này, ghi nhận thông tin log cảnh báo ở mức `WARN`, và tự động fallback trả về Map rỗng `{}` để tiếp tục tiến trình tìm kiếm ngữ nghĩa thông thường mà không làm ảnh hưởng đến độ sẵn sàng của hệ thống.
 
 ---
 
@@ -536,30 +683,42 @@ Quy trình tìm kiếm tương đồng ngữ nghĩa thực hiện chuyển đổ
 *   **HTTP Method**: `POST`
 *   **Path**: `/api/v1/search`
 *   **Headers**: `Authorization: Bearer <JWT_TOKEN>`
-*   **Request Body (JSON)**:
+*   **Request Body (JSON)** — reuse `RagChatRequest` (Client-facing request chỉ chứa câu hỏi `message` của người dùng, không bao gồm `metadataFilter` vì trường này được LLM tự động trích xuất nội bộ):
     ```json
     {
-      "query": "Tôi đi xe buýt đi làm có được trợ cấp không?",
-      "limit": 3
+      "message": "Tôi đi xe buýt đi làm có được trợ cấp không?"
     }
     ```
     *Ràng buộc dữ liệu*:
-    *   `query`: Không được để trống (NotBlank), độ dài tối đa 500 ký tự.
-    *   `limit`: Kiểu số nguyên, tối thiểu là 1, tối đa là 10, mặc định là 3 nếu không truyền.
+    *   `message`: Không được để trống (NotBlank).
 
-#### 5.1.2. Phản hồi Thành công (200 OK)
+#### 5.1.2. Internal DTO: SearchContext
+Dữ liệu đầu vào sau khi xử lý qua LLM và sinh vector nhúng sẽ được đóng gói vào đối tượng context nội bộ để truyền xuống tầng Repository:
+```java
+public class SearchContext {
+    private final String message;                     // Câu hỏi gốc từ client
+    private final float[] queryVector;                // Vector nhúng 1024 chiều từ EmbeddingService
+    private final Map<String, Object> metadataFilter; // Siêu dữ liệu do LLM trích xuất tự động (Map rỗng {} nếu fallback)
+    private final UUID userDeptId;                    // ID phòng ban của người dùng hiện tại
+    private final UUID boardDeptId;                   // ID phòng BOARD mật
+}
+```
+
+#### 5.1.3. Phản hồi Thành công (200 OK) — bọc trong `ApiResponse<RagChatResponse>`
 ```json
 {
   "success": true,
   "data": {
-    "results": [
+    "response": "Tìm thấy 2 kết quả phù hợp.",
+    "chunks": [
       {
-        "chunkId": "48b6d859-e932-4752-96a8-a53c072d6211",
-        "chunkContent": "Chính sách hỗ trợ phương tiện công cộng áp dụng cho nhân viên đi xe buýt đi làm với mức trợ cấp 200,000 VND/tháng",
-        "documentId": "87c71ba2-6b95-4aa8-bc1c-99d9b626dcd0",
-        "displayTitle": "Quy chế phúc lợi nhân viên",
-        "documentBusinessCode": "DOC_HR_0012",
-        "similarityScore": 0.8954
+        "content": "Chính sách hỗ trợ phương tiện công cộng áp dụng cho nhân viên đi xe buýt đi làm với mức trợ cấp 200,000 VND/tháng",
+        "score": 0.8954,
+        "metadata": {
+          "main_topic": "phương tiện công cộng",
+          "similarity": 0.8954,
+          "distance": 0.1046
+        }
       }
     ]
   },
@@ -567,10 +726,10 @@ Quy trình tìm kiếm tương đồng ngữ nghĩa thực hiện chuyển đổ
 }
 ```
 
-#### 5.1.3. Các trường hợp lỗi API
-*   **400 Bad Request**: Yêu cầu không hợp lệ (Ví dụ: câu hỏi rỗng, limit vượt quá 10). Trả về mã lỗi `VALIDATION_ERROR`.
-*   **403 Forbidden**: Người dùng có vai trò `SYSTEM_ADMIN` thực hiện yêu cầu. Trả về mã lỗi `ERR_FORBIDDEN_ROLE`.
-*   **401 Unauthorized**: JWT token bị thiếu, hết hạn hoặc không hợp lệ. Trả về mã lỗi `ERR_UNAUTHENTICATED`.
+#### 5.1.4. Các trường hợp lỗi API
+*   **400 Bad Request**: `message` rỗng. Trả về mã lỗi `VALIDATION_ERROR`.
+*   **403 Forbidden**: `SYSTEM_ADMIN` thực hiện yêu cầu (kiểm tra tại `RetrievalServiceImpl`). Trả về `ERR_FORBIDDEN_ROLE`.
+*   **401 Unauthorized**: JWT token thiếu hoặc không hợp lệ. Trả về `ERR_UNAUTHENTICATED`.
 
 ---
 
@@ -579,52 +738,67 @@ Quy trình tìm kiếm tương đồng ngữ nghĩa thực hiện chuyển đổ
 Đây là truy vấn cốt lõi thực thi tìm kiếm ngữ nghĩa đồng thời áp dụng toàn bộ các chính sách phân quyền tại cơ sở dữ liệu. Để tăng tính rõ ràng và loại bỏ rủi ro sai sót thứ tự, câu lệnh sử dụng **Named Parameters** và hiển thị tiêu đề tài liệu gốc chéo phòng ban theo đúng PRD:
 
 ```sql
-SELECT 
-    c.id AS chunk_id,
-    c.content AS chunk_content,
-    c.metadata AS chunk_metadata,
-    d.id AS document_id,
-    d.title AS display_title,
-    d.business_code AS document_business_code,
-    1.0 - (c.embedding <=> CAST(:queryVector AS vector)) AS similarity_score -- Tính tương đồng Cosine = 1 - Cosine Distance
-FROM tbl_chunks c
-JOIN tbl_documents d ON c.document_id = d.id
--- Left Join để kiểm tra liên kết Alias đang hoạt động được chia sẻ tới phòng ban của user hiện tại
-LEFT JOIN tbl_documents a ON a.parent_id = d.id 
-                         AND a.owner_department_id = :userDeptId 
-                         AND a.deleted_at IS NULL 
-WHERE d.parent_id IS NULL -- Chỉ lấy các phân mảnh thuộc tài liệu gốc
-  AND d.status = 'COMPLETED' -- Tài liệu gốc phải số hoá hoàn thành
-  AND d.deleted_at IS NULL -- Tài liệu gốc chưa bị xóa logic
-  AND (
-      -- Điều kiện cách ly phòng ban:
-      -- Quyền 1: Người dùng thuộc phòng ban sở hữu tài liệu gốc
-      d.owner_department_id = :userDeptId
-      OR
-      -- Quyền 2: Tài liệu được chia sẻ hợp lệ qua Alias tới phòng ban của người dùng
-      a.id IS NOT NULL
-  )
-  -- Quy tắc cô lập tuyệt đối của BOARD:
-  -- Nếu tài liệu gốc thuộc sở hữu của BOARD, bắt buộc người dùng thực hiện truy vấn cũng phải thuộc phòng ban BOARD
-  AND (
-      d.owner_department_id <> :boardDeptId
-      OR
-      (
-          d.owner_department_id = :boardDeptId
-          AND :userDeptId = :boardDeptId
+SELECT * FROM (
+    -- Phân đoạn 1: Tài liệu do phòng ban người dùng sở hữu trực tiếp
+    SELECT 
+        c.id AS chunk_id,
+        c.content AS chunk_content,
+        c.metadata AS chunk_metadata,
+        d.id AS document_id,
+        d.title AS display_title,
+        d.business_code AS document_business_code,
+        1.0 - (c.embedding <=> CAST(:queryVector AS vector)) AS similarity_score
+    FROM tbl_chunks c
+    JOIN tbl_documents d ON c.document_id = d.id
+    WHERE d.parent_id IS NULL -- Chỉ lấy tài liệu gốc
+      AND d.status = 'COMPLETED'
+      AND d.deleted_at IS NULL
+      AND d.owner_department_id = :userDeptId
+      -- Quy tắc cô lập tuyệt đối của BOARD
+      AND (
+          d.owner_department_id <> :boardDeptId
+          OR :userDeptId = :boardDeptId
       )
-  )
-  -- Bộ lọc ngưỡng tương đồng tối thiểu (Similarity Threshold):
-  -- Loại bỏ các mảnh có điểm tương đồng Cosine thấp hơn ngưỡng cấu hình động
-  AND (1.0 - (c.embedding <=> CAST(:queryVector AS vector))) >= :similarityThreshold
--- Sử dụng toán tử <=> của pgvector để tìm kiếm trên chỉ mục HNSW
-ORDER BY c.embedding <=> CAST(:queryVector AS vector) ASC
+      -- Tiền lọc theo metadata JSONB sử dụng GIN jsonb_path_ops
+      AND (:metadataFilter IS NULL OR c.metadata @> CAST(:metadataFilter AS jsonb))
+    ORDER BY c.embedding <=> CAST(:queryVector AS vector) ASC
+    LIMIT :limit
+)
+UNION ALL
+(
+    -- Phân đoạn 2: Tài liệu được chia sẻ hợp lệ qua Alias tới phòng ban của người dùng
+    SELECT 
+        c.id AS chunk_id,
+        c.content AS chunk_content,
+        c.metadata AS chunk_metadata,
+        d.id AS document_id,
+        d.title AS display_title,
+        d.business_code AS document_business_code,
+        1.0 - (c.embedding <=> CAST(:queryVector AS vector)) AS similarity_score
+    FROM tbl_chunks c
+    JOIN tbl_documents d ON c.document_id = d.id
+    JOIN tbl_documents a ON a.parent_id = d.id 
+                        AND a.owner_department_id = :userDeptId 
+                        AND a.deleted_at IS NULL
+    WHERE d.parent_id IS NULL
+      AND d.status = 'COMPLETED'
+      AND d.deleted_at IS NULL
+      -- Quy tắc cô lập tuyệt đối của BOARD
+      AND (
+          d.owner_department_id <> :boardDeptId
+          OR :userDeptId = :boardDeptId
+      )
+      -- Tiền lọc theo metadata JSONB sử dụng GIN jsonb_path_ops
+      AND (:metadataFilter IS NULL OR c.metadata @> CAST(:metadataFilter AS jsonb))
+    ORDER BY c.embedding <=> CAST(:queryVector AS vector) ASC
+    LIMIT :limit
+)
+ORDER BY similarity_score DESC
 LIMIT :limit;
 ```
 
 #### 5.2.2. Truy vấn xác thực liên kết Alias
 Truy vấn này được sử dụng riêng biệt khi cần đánh giá nhanh xem một phòng ban nhận có quyền truy cập logic vào một tài liệu gốc cụ thể hay không tại thời điểm chạy:
-
 ```sql
 SELECT EXISTS (
     SELECT 1 
@@ -637,13 +811,10 @@ SELECT EXISTS (
 
 ---
 
----
-
 ## 6. SECURITY & AUTHORIZATION DESIGN (THIẾT KẾ BẢO MẬT & PHÂN QUYỀN)
 
 ### 6.1. Department Isolation (Cách ly Phòng ban)
 Việc thực thi bảo mật phân quyền và kiểm soát lọc kết quả được dịch hoàn toàn thành các mệnh đề điều kiện (SQL predicates) lồng ghép trực tiếp vào câu lệnh SQL tìm kiếm vector:
-
 *   **Department Isolation (Cô lập phòng ban)**:
     *   Người dùng thuộc phòng ban $D_A$ chỉ được tìm kiếm các mảnh văn bản thuộc tài liệu do $D_A$ sở hữu (tài liệu gốc) hoặc các tài liệu phòng ban khác chia sẻ cho $D_A$ thông qua Alias đang có hiệu lực.
     *   Công thức logic lọc trong SQL:
@@ -660,17 +831,15 @@ Việc thực thi bảo mật phân quyền và kiểm soát lọc kết quả �
         ```sql
         d.status = 'COMPLETED'
         ```
-*   **Similarity Threshold (Ngưỡng tương đồng tối thiểu)**:
-    *   Loại bỏ các kết quả có điểm tương đồng dưới ngưỡng cấu hình động (mặc định 0.60):
+*   **Metadata Filtering (Bộ lọc siêu dữ liệu & Cổng Chặn Cứng)**:
+    *   Thực hiện tiền lọc trước các phân đoạn chứa nội dung chính tương thích với câu hỏi bằng toán tử khớp chứa `@>` kết hợp chỉ mục GIN `jsonb_path_ops`:
         ```sql
-        (1.0 - (c.embedding <=> :queryEmbedding)) >= :similarityThreshold
+        (:metadataFilter IS NULL OR c.metadata @> CAST(:metadataFilter AS jsonb))
         ```
-
----
+    *   **Logic ngắt sớm (Short-circuit on Empty Metadata / Empty Candidates)**: Nếu câu hỏi không trích xuất được siêu dữ liệu nào từ LLM HOẶC tiền lọc metadata kết hợp lọc quyền trả về 0 ứng viên ($N=0$), service `RetrievalServiceImpl` lập tức ngắt luồng xử lý và trả về kết quả rỗng `[]` ("Không tìm thấy kết quả phù hợp"), tuyệt đối không thực thi tìm kiếm vector trên toàn bộ dữ liệu.
 
 ### 6.2. Alias Sharing (Liên kết Chia sẻ Alias)
 Phân giải quyền truy cập chia sẻ logic thông qua liên kết Alias chéo phòng ban:
-
 *   **Runtime Evaluation**: Trạng thái Alias được kiểm tra trực tiếp tại thời điểm truy vấn thông qua phép `LEFT JOIN` với dòng bản ghi Alias trong bảng `tbl_documents` (nơi `parent_id` trỏ đến ID tài liệu gốc và `owner_department_id` của Alias trùng với phòng ban của người dùng hiện tại).
 *   **Kiểm tra hiệu lực Alias**:
     *   Alias phải chưa bị xóa logic: `a.deleted_at IS NULL`.
@@ -680,11 +849,8 @@ Phân giải quyền truy cập chia sẻ logic thông qua liên kết Alias ch�
     d.title AS display_title
     ```
 
----
-
 ### 6.3. BOARD Isolation (Cô lập Ban Giám đốc)
 Tài liệu thuộc phòng ban Ban Giám đốc (BOARD) là tuyệt mật và có chính sách bảo vệ nghiêm ngặt nhất:
-
 *   **Bất biến kiến trúc**: Tài liệu của BOARD chỉ cho phép thành viên thuộc phòng ban BOARD tìm kiếm và đọc nội dung. Tuyệt đối không được phép chia sẻ Alias ra ngoài phòng ban BOARD.
 *   **Ràng buộc trong SQL**:
     Để ngăn chặn bất kỳ hành vi cố ý hoặc vô tình vượt quyền (ví dụ: một Alias của tài liệu BOARD bằng cách nào đó được chèn lén lút vào database), câu lệnh SQL tìm kiếm vector bổ sung một mệnh đề loại trừ tuyệt đối:
@@ -699,8 +865,6 @@ Tài liệu thuộc phòng ban Ban Giám đốc (BOARD) là tuyệt mật và c�
     )
     ```
     *Ý nghĩa*: Nếu tài liệu gốc thuộc sở hữu của phòng ban có mã `'BOARD'`, thì điều kiện truy cập bắt buộc phải thỏa mãn người dùng hiện tại thuộc phòng ban có mã `'BOARD'`. Mọi liên kết Alias (kể cả có tồn tại) của tài liệu BOARD đều sẽ bị chặn đứng tại mệnh đề này đối với người dùng ngoài BOARD.
-
----
 
 ### 6.4. Administrative Control & Multi-layered Security (Chặn Quản trị viên & Bảo mật Đa lớp)
 Quy trình áp dụng chính sách an toàn bảo mật được thực hiện qua 4 ranh giới chặt chẽ:
@@ -723,19 +887,15 @@ Quy trình áp dụng chính sách an toàn bảo mật được thực hiện q
 
 ---
 
----
-
 ## 7. NON-FUNCTIONAL & SYSTEM ROBUSTNESS (THIẾT KẾ PHI CHỨC NĂNG & ĐỘ BỀN BỈ)
 
 ### 7.1. Resource Bounding (Giới hạn Tài nguyên)
 Tiến trình sinh vector nhúng in-process đòi hỏi cấu hình kiểm soát tài nguyên để tránh nghẽn CPU/RAM của tiến trình Java chính:
-
 *   **Concurrency Task Limit (Giới hạn số tác vụ song song)**:
     Cấu hình pool thực thi của Background Worker Tuần 3 tối đa là 2 luồng xử lý số hóa tài liệu chạy song song (`eap.worker.thread-pool.digitization-size = 2`). Điều này giới hạn tối đa chỉ có 2 luồng đồng thời gọi ONNX Runtime session để suy luận mô hình.
 *   **Cấu hình Thread của ONNX Runtime**:
     ```java
     OrtSession.SessionOptions options = new OrtSession.SessionOptions();
-    // Giới hạn luồng tính toán toán tử CPU in-process của ONNX
     options.setIntraOpNumThreads(2); 
     options.setInterOpNumThreads(1);
     options.setExecutionMode(OrtSession.SessionOptions.ExecutionMode.ORT_SEQUENTIAL);
@@ -744,8 +904,6 @@ Tiến trình sinh vector nhúng in-process đòi hỏi cấu hình kiểm soát
     *   Mô hình BGE-M3 quantized chiếm khoảng ~570MB dung lượng bộ nhớ.
     *   Việc sử dụng mmap của ONNX Runtime giúp nạp mô hình vào vùng nhớ **Off-Heap (Native Memory)** của hệ điều hành thay vì JVM Heap, tránh rủi ro treo JVM do Garbage Collection (GC) quét dọn vùng nhớ lớn liên tục.
     *   Khuyến nghị cấu hình RAM cho container ứng dụng Spring Boot tối thiểu là **3GB** (với `-Xmx1500m` cấp phát cho JVM Heap và phần còn lại dành cho hệ điều hành/Off-Heap của ONNX).
-
----
 
 ### 7.2. Error Handling (Xử lý Lỗi Hệ thống)
 Hệ thống phân loại các lỗi phát sinh rõ ràng để có phản ứng phù hợp:
@@ -758,31 +916,8 @@ Hệ thống phân loại các lỗi phát sinh rõ ràng để có phản ứng
 | **Document-level Fatal Error** | Tệp tin gốc bị mã hoá, bị lỗi định dạng không trích xuất được chữ; hoặc mất kết nối DB hoàn toàn. | Dừng toàn bộ luồng số hóa của tài liệu hiện tại, chuyển trạng thái tài liệu sang `FAILED` giải phóng worker. | Ghi log `ERROR` kèm stack trace. Tăng metric `digitization_failure_total`. |
 | **System Unavailability** | File mô hình ONNX bị mất, hoặc thư viện ONNX C++ không tương thích môi trường. | Fail-fast ngay khi khởi động ứng dụng (Application Startup Fail). | Ghi log `FATAL` dừng khởi chạy ứng dụng Spring Boot. |
 
----
-
-### 7.3. System Observability (Khả năng Giám sát)
-#### 7.3.1. Hệ thống Metrics nghiệp vụ (Micrometer / Prometheus)
-Hệ thống sẽ đăng ký và cập nhật các chỉ số đo lường sau:
-*   `digitization_success_total`: Tổng số tài liệu số hóa hoàn thành trạng thái `COMPLETED` (Counter).
-*   `digitization_failure_total`: Tổng số tài liệu số hóa bị thất bại chuyển sang trạng thái `FAILED` (Counter).
-*   `chunk_processed_total`: Tổng số mảnh văn bản được xử lý và ghi nhận thành công (Counter).
-*   `chunk_skipped_total`: Tổng số mảnh văn bản bị lỗi và bị bỏ qua sau 3 lần retry (Counter).
-*   `embedding_retry_total`: Tổng số lần luồng xử lý phải thử lại khi sinh vector nhúng (Counter).
-*   `embedding_latency`: Thời gian sinh vector nhúng cho một mảnh văn bản (Timer).
-*   `query_embedding_latency`: Thời gian sinh vector nhúng cho một câu hỏi tìm kiếm ngữ nghĩa (Timer).
-*   `db_retrieval_latency`: Thời gian thực hiện câu truy vấn SQL tìm kiếm vector tại PostgreSQL (Timer).
-*   `retrieval_latency`: Thời gian phản hồi tổng thể của API tìm kiếm (Timer).
-*   `retrieval_result_count`: Số lượng kết quả tìm kiếm thực tế trả về cho người dùng (Distribution Summary).
-
-#### 7.3.2. Nguyên tắc Ghi nhật ký (Logging)
-*   **MDC (Mapped Diagnostic Context)**: Mọi dòng log trong đường ống số hóa bắt buộc phải đính kèm thông tin ngữ cảnh `documentId` và `workerId` để hỗ trợ truy vết lỗi chéo luồng.
-*   **Bảo mật thông tin**: Tuyệt đối không ghi nội dung văn bản nghiệp vụ của các mảnh (chunk content) hoặc chuỗi câu hỏi của người dùng vào tệp nhật ký để tuân thủ quy tắc an toàn thông tin nghiệp vụ của doanh nghiệp.
-
----
-
-### 7.4. Performance SLA Benchmarks (Đo lường Hiệu năng)
+### 7.3. Performance SLA Benchmarks (Đo lường Hiệu năng)
 Để đảm bảo đáp ứng các mục tiêu SLA đề ra trong ADD:
-
 *   **Đo lường thời gian phản hồi tìm kiếm (Target: p95 < 500ms)**:
     *   Hạ tầng kiểm thử: Cơ sở dữ liệu giả lập chứa tối thiểu 10.000 phân đoạn văn bản nghiệp vụ phân bổ đều ở các phòng ban.
     *   Giả lập tải: Sử dụng công cụ `k6` giả lập 100 người dùng truy vấn đồng thời liên tục trong 5 phút.
@@ -793,15 +928,17 @@ Hệ thống sẽ đăng ký và cập nhật các chỉ số đo lường sau:
 
 ---
 
----
-
 ## 8. TESTING & ASSUMPTIONS (KIỂM THỬ & GIẢ ĐỊNH)
 
 ### 8.1. Unit & Integration Testing (Thiết kế Kiểm thử Lớp)
 #### 8.1.1. Kiểm thử đơn vị (Unit Tests)
-*   **`ChunkingServiceTest`**: Kiểm thử việc phân tách tài liệu dựa trên ký tự ngắt đoạn tự nhiên (mặc định `\n\n`), kiểm thử cơ chế cắt câu tiếng Việt tại ranh giới câu khi vượt quá giới hạn tối đa (`max-tokens`), kiểm thử tính năng tránh phân mảnh vụn bằng cách gộp phần dư dưới `min-tokens` vào mảnh liền trước, và kiểm thử sự tích hợp với cấu hình tham số động.
+*   **`ChunkingServiceTest`**: Kiểm thử việc phân tách tài liệu dựa trên ký tự ngắt đoạn tự nhiên (mặc định `\n\n`), kiểm thử tính xác định (deterministic) của thuật toán bảo đảm tính lũy đẳng (idempotency) khi chạy lại trên cùng một văn bản, và kiểm thử việc thay đổi tham số cấu hình động `paragraph-separator`.
 *   **`EmbeddingServiceTest`**: Mô phỏng output sinh vector từ ONNX Runtime. Xác thực tính năng ném lỗi lập tức (fail-fast) nếu vector trả về không đúng 1024 chiều. Kiểm tra tính chính xác của hàm chuẩn hoá L2.
 *   **`DigitizationRetryTest`**: Sử dụng Mockito để giả lập luồng sinh vector bị lỗi. Kiểm tra việc thử lại đúng 3 lần, ghi nhận log và thực hiện skip mảnh lỗi thành công mà không làm sập tiến trình chung của tài liệu.
+*   **`LlmMetadataExtractorServiceTest`**:
+    *   Kiểm thử trích xuất siêu dữ liệu thành công: LLM trả về chuỗi JSON chứa `{"nam": 2026}` -> parse đúng thành đối tượng Map.
+    *   Kiểm thử trích xuất siêu dữ liệu rỗng: LLM trả về `{}` -> Map rỗng, không throw exception.
+    *   Kiểm thử timeout/network error: Giả lập HTTP client ném ngoại lệ TimeoutException -> catch ngoại lệ, ghi log WARN, và trả về Map rỗng `{}`.
 
 #### 8.1.2. Kiểm thử tích hợp (Integration Tests)
 Các kiểm thử tích hợp chạy trên cơ sở dữ liệu PostgreSQL thực tế sử dụng Testcontainers:
@@ -819,6 +956,9 @@ Các kiểm thử tích hợp chạy trên cơ sở dữ liệu PostgreSQL thự
     *   Xác thực rằng nếu cố tình chèn thủ công một liên kết Alias trỏ đến tài liệu BOARD, mệnh đề SQL phân quyền của BOARD vẫn chặn đứng kết quả.
 *   **`SystemAdminContentBlockTest`**:
     *   Mô phỏng tài khoản `SYSTEM_ADMIN` gọi endpoint `/api/v1/search` và các endpoint xem nội dung tài liệu khác, xác thực kết quả nhận về luôn là HTTP 403 Forbidden.
+*   **`LlmMetadataExtractionIntegrationTest`**:
+    *   Giả lập LLM API trả về `{"applicable_roles": ["STAFF"]}`. Nạp dữ liệu có các phân đoạn dành cho STAFF và các vai trò khác. Thực hiện truy vấn tìm kiếm và xác định chỉ có các phân đoạn dành cho STAFF được trả về.
+    *   Giả lập LLM API bị timeout/gặp sự cố kết nối mạng -> xác thực hệ thống tự động fallback, trả về kết quả tìm kiếm ngữ nghĩa thông thường (không bị lỗi 500).
 
 #### 8.1.3. Kiểm thử chất lượng truy xuất
 *   Chuẩn bị tập dữ liệu kiểm nghiệm (Ground Truth) gồm 50 câu hỏi nghiệp vụ đã chuẩn hóa của doanh nghiệp.
@@ -832,42 +972,72 @@ Các kiểm thử tích hợp chạy trên cơ sở dữ liệu PostgreSQL thự
 ### 8.2. Ground Truth Quality Testing (Kiểm thử Chất lượng RAG)
 Kiểm thử chất lượng truy xuất được định nghĩa chi tiết tại [Mục 8.1.3](#813-kiểm-thử-chất-lượng-truy-xuất) bằng bộ Ground Truth gồm 50 câu hỏi nghiệp vụ chuẩn hóa, đảm bảo tỷ lệ Hit Rate @ Top-3 >= 90%.
 
-### 8.3. Execution Plan Verification (Phân tích Kế hoạch Thực thi)
-Trước khi nghiệm thu đưa vào vận hành, lập trình viên/vận hành viên bắt buộc phải chạy phân tích kế hoạch thực thi câu lệnh SQL tìm kiếm vector bằng cú pháp:
+---
 
+### 8.3. Execution Plan Verification (Phân tích Kế hoạch Thực thi & Tối ưu HNSW)
+Trước khi nghiệm thu đưa vào vận hành, lập trình viên/vận hành viên bắt buộc phải cấu hình tối ưu chỉ mục HNSW cho phiên truy vấn:
+```sql
+SET pgvector.iterative_index_scan = 'strict';
+SET hnsw.ef_search = 64;
+```
+
+Phân tích kế hoạch thực thi câu lệnh SQL tìm kiếm vector bằng cú pháp:
 ```sql
 EXPLAIN (ANALYZE, BUFFERS)
-SELECT 
-    c.id AS chunk_id,
-    c.content AS chunk_content,
-    d.id AS document_id,
-    d.title AS display_title,
-    d.business_code AS document_business_code,
-    1.0 - (c.embedding <=> CAST(:queryEmbedding AS vector)) AS similarity_score
-FROM tbl_chunks c
-JOIN tbl_documents d ON c.document_id = d.id
-LEFT JOIN tbl_documents a ON a.parent_id = d.id 
-                         AND a.owner_department_id = :userDeptId 
-                         AND a.deleted_at IS NULL 
-WHERE d.parent_id IS NULL
-  AND d.status = 'COMPLETED'
-  AND d.deleted_at IS NULL
-  AND (
-      d.owner_department_id = :userDeptId
-      OR
-      a.id IS NOT NULL
-  )
-  AND (
-      d.owner_department_id <> :boardDeptId
-      OR
-      (
-          d.owner_department_id = :boardDeptId
-          AND :userDeptId = :boardDeptId
+(
+    SELECT 
+        c.id AS chunk_id,
+        c.content AS chunk_content,
+        c.metadata AS chunk_metadata,
+        d.id AS document_id,
+        d.title AS display_title,
+        d.business_code AS document_business_code,
+        1.0 - (c.embedding <=> CAST(:queryVector AS vector)) AS similarity_score
+    FROM tbl_chunks c
+    JOIN tbl_documents d ON c.document_id = d.id
+    WHERE d.parent_id IS NULL
+      AND d.status = 'COMPLETED'
+      AND d.deleted_at IS NULL
+      AND d.owner_department_id = :userDeptId
+      -- Quy tắc cô lập tuyệt đối của BOARD
+      AND (
+          d.owner_department_id <> :boardDeptId
+          OR :userDeptId = :boardDeptId
       )
-  )
-  -- Lọc theo ngưỡng tương đồng tối thiểu
-  AND (1.0 - (c.embedding <=> CAST(:queryEmbedding AS vector))) >= :similarityThreshold
-ORDER BY c.embedding <=> CAST(:queryEmbedding AS vector) ASC
+      -- Tiền lọc theo metadata JSONB sử dụng GIN jsonb_path_ops
+      AND (:metadataFilter IS NULL OR c.metadata @> CAST(:metadataFilter AS jsonb))
+    ORDER BY c.embedding <=> CAST(:queryVector AS vector) ASC
+    LIMIT :limit
+)
+UNION ALL
+(
+    SELECT 
+        c.id AS chunk_id,
+        c.content AS chunk_content,
+        c.metadata AS chunk_metadata,
+        d.id AS document_id,
+        d.title AS display_title,
+        d.business_code AS document_business_code,
+        1.0 - (c.embedding <=> CAST(:queryVector AS vector)) AS similarity_score
+    FROM tbl_chunks c
+    JOIN tbl_documents d ON c.document_id = d.id
+    JOIN tbl_documents a ON a.parent_id = d.id 
+                        AND a.owner_department_id = :userDeptId 
+                        AND a.deleted_at IS NULL
+    WHERE d.parent_id IS NULL
+      AND d.status = 'COMPLETED'
+      AND d.deleted_at IS NULL
+      -- Quy tắc cô lập tuyệt đối của BOARD
+      AND (
+          d.owner_department_id <> :boardDeptId
+          OR :userDeptId = :boardDeptId
+      )
+      -- Tiền lọc theo metadata JSONB sử dụng GIN jsonb_path_ops
+      AND (:metadataFilter IS NULL OR c.metadata @> CAST(:metadataFilter AS jsonb))
+    ORDER BY c.embedding <=> CAST(:queryVector AS vector) ASC
+    LIMIT :limit
+)
+ORDER BY similarity_score DESC
 LIMIT :limit;
 ```
 
@@ -893,19 +1063,19 @@ Limit  (cost=278.87..295.56 rows=3 width=689) (actual time=33.318..34.005 rows=3
         ->  Nested Loop  (cost=254.25..41434.82 rows=7451 width=209) (actual time=32.875..33.231 rows=3 loops=1)
               Buffers: shared hit=1250 read=160
               ->  Index Scan using idx_chunks_embedding_hnsw on tbl_chunks c  (cost=254.10..41179.00 rows=10000 width=162) (actual time=32.587..32.913 rows=4 loops=1)
-                    Order By: (embedding <=> '[-0.017562, ...]'::vector)
-                    Filter: ((1.0 - (embedding <=> '[-0.017562, ...]'::vector)) >= 0.60)
-                    Buffers: shared hit=1238 read=160
+                     Order By: (embedding <=> '[-0.017562, ...]'::vector)
+                     Filter: ((1.0 - (embedding <=> '[-0.017562, ...]'::vector)) >= 0.60)
+                     Buffers: shared hit=1238 read=160
               ->  Memoize  (cost=0.15..0.18 rows=1 width=63) (actual time=0.072..0.072 rows=1 loops=4)
-                    Cache Key: c.document_id
-                    Cache Mode: logical
-                    Hits: 1  Misses: 3  Evictions: 0  Overflows: 0  Memory Usage: 1kB
-                    Buffers: shared hit=12
-                    ->  Index Scan using documents_pkey on tbl_documents d  (cost=0.14..0.17 rows=1 width=63) (actual time=0.083..0.083 rows=1 loops=3)
-                          Index Cond: (id = c.document_id)
-                          Filter: ((parent_id IS NULL) AND (deleted_at IS NULL) AND ((status)::text = 'COMPLETED'::text) AND ((owner_department_id <> $0) OR ((owner_department_id = $1) AND ('3e7a0dc2-55e2-4f37-9390-b26a7d528faf'::uuid = $2))))
-                          Rows Removed by Filter: 0
-                          Buffers: shared hit=12
+                     Cache Key: c.document_id
+                     Cache Mode: logical
+                     Hits: 1  Misses: 3  Evictions: 0  Overflows: 0  Memory Usage: 1kB
+                     Buffers: shared hit=12
+                     ->  Index Scan using documents_pkey on tbl_documents d  (cost=0.14..0.17 rows=1 width=63) (actual time=0.083..0.083 rows=1 loops=3)
+                           Index Cond: (id = c.document_id)
+                           Filter: ((parent_id IS NULL) AND (deleted_at IS NULL) AND ((status)::text = 'COMPLETED'::text) AND ((owner_department_id <> $0) OR ((owner_department_id = $1) AND ('3e7a0dc2-55e2-4f37-9390-b26a7d528faf'::uuid = $2))))
+                           Rows Removed by Filter: 0
+                           Buffers: shared hit=12
         ->  Memoize  (cost=0.14..0.58 rows=1 width=50) (actual time=0.005..0.005 rows=0 loops=3)
               Cache Key: d.id
               Cache Mode: logical
@@ -921,20 +1091,13 @@ Execution Time: 34.383 ms
 ```
 
 **Nhận xét phân tích hiệu năng và tính đúng đắn**:
-1.  **Index Scan HNSW hoạt động chính xác**:
-    *   Hệ thống sử dụng đúng chỉ mục `idx_chunks_embedding_hnsw` thông qua phép quét `Index Scan` (`Order By: (embedding <=> ?)`). Tránh việc quét tuần tự toàn bộ bảng (`Seq Scan`) giúp tốc độ truy vấn đạt hiệu năng vượt trội khi số lượng dữ liệu mảnh tăng lên.
-2.  **Thời gian thực thi tối ưu (Execution Time)**:
-    *   Tổng thời gian thực thi thực tế (`Execution Time`) chỉ mất **34.383 ms** trên tập dữ liệu thử nghiệm, đáp ứng xuất sắc SLA nghiệp vụ đề ra (yêu cầu dưới **50ms** trong cơ sở dữ liệu và dưới **500ms** cho toàn bộ API).
-3.  **Loại bỏ các truy vấn con tìm phòng BOARD (InitPlans)**:
-    *   Bằng việc chuyển ID phòng ban BOARD thành tham số truyền vào từ mã Java (`:boardDeptId`), cơ sở dữ liệu không cần thực hiện quét bảng `tbl_departments` thông qua các chương trình con `InitPlan` nữa, giúp tối ưu hóa hiệu năng và đơn giản hóa cây kế hoạch thực thi.
-4.  **Cơ chế Memoize hiệu quả**:
-    *   PostgreSQL đã tối ưu hóa phép Join bằng cách tạo bộ đệm `Memoize` với khóa cache là `c.document_id` và `d.id`.
-    *   Khi duyệt qua các mảnh (`tbl_chunks`) thuộc cùng một tài liệu gốc (`tbl_documents`), thông tin kiểm tra quyền của tài liệu sẽ được lấy trực tiếp từ cache (`Hits`) thay vì phải thực hiện lại truy vấn quét khóa chính `documents_pkey`, giúp giảm thiểu tối đa số lượng block dữ liệu cần đọc từ đĩa.
-5.  **Tỷ lệ Shared Buffer Hit cao**:
-    *   Bộ đệm chia sẻ đạt tỉ lệ truy cập trúng `shared hit=1274` và chỉ có `read=160`. Điều này cho thấy dữ liệu hầu hết đã được tải lên RAM, hạn chế tối đa hoạt động I/O đĩa vật lý chậm chạp. Trong các lượt chạy tiếp theo, số block `read` sẽ tiệm cận về `0`.
+1.  **Index Scan HNSW hoạt động chính xác**: Hệ thống sử dụng đúng chỉ mục `idx_chunks_embedding_hnsw` thông qua phép quét `Index Scan` (`Order By: (embedding <=> ?)`). Tránh việc quét tuần tự toàn bộ bảng (`Seq Scan`) giúp tốc độ truy vấn đạt hiệu năng vượt trội khi số lượng dữ liệu mảnh tăng lên.
+2.  **Thời gian thực thi tối ưu (Execution Time)**: Tổng thời gian thực thi thực tế (`Execution Time`) chỉ mất **34.383 ms** trên tập dữ liệu thử nghiệm, đáp ứng xuất sắc SLA nghiệp vụ đề ra (yêu cầu dưới **50ms** trong cơ sở dữ liệu và dưới **500ms** cho toàn bộ API).
+3.  **Loại bỏ các truy vấn con tìm phòng BOARD (InitPlans)**: Bằng việc chuyển ID phòng ban BOARD thành tham số truyền vào từ mã Java (`:boardDeptId`), cơ sở dữ liệu không cần thực hiện quét bảng `tbl_departments` thông qua các chương trình con `InitPlan` nữa, giúp tối ưu hóa hiệu năng và đơn giản hóa cây kế hoạch thực thi.
+4.  **Cơ chế Memoize hiệu quả**: PostgreSQL đã tối ưu hóa phép Join bằng cách tạo bộ đệm `Memoize` với khóa cache là `c.document_id` và `d.id`. Khi duyệt qua các mảnh (`tbl_chunks`) thuộc cùng một tài liệu gốc (`tbl_documents`), thông tin kiểm tra quyền của tài liệu sẽ được lấy trực tiếp từ cache (`Hits`) thay vì phải thực hiện lại truy vấn quét khóa chính `documents_pkey`, giúp giảm thiểu tối đa số lượng block dữ liệu cần đọc từ đĩa.
+5.  **Tỷ lệ Shared Buffer Hit cao**: Bộ đệm chia sẻ đạt tỉ lệ truy cập trúng `shared hit=1274` và chỉ có `read=160`. Điều này cho thấy dữ liệu hầu hết đã được tải lên RAM, hạn chế tối đa hoạt động I/O đĩa vật lý chậm chạp. Trong các lượt chạy tiếp theo, số block `read` sẽ tiệm cận về `0`.
 
 #### 8.3.2. Kịch bản đối chiếu: Seq Scan (không có chỉ mục HNSW)
-
 Kết quả chạy thử nghiệm khi PostgreSQL quyết định dùng chiến lược quét tuần tự (`Seq Scan`) thay vì chỉ mục HNSW — xảy ra khi chỉ mục chưa được tạo hoặc bộ đếm thống kê dẫn planner đi sai hướng:
 
 ```text
@@ -987,7 +1150,6 @@ Execution Time: 56.768 ms
 ```
 
 #### 8.3.3. So sánh hai chiến lược thực thi
-
 | Tiêu chí | HNSW Index Scan ✅ | Seq Scan ❌ |
 | :--- | :--- | :--- |
 | **Execution Time** | **34.383 ms** | **56.768 ms** (+65%) |
@@ -1016,3 +1178,4 @@ Execution Time: 56.768 ms
 #### 8.4.2. Các Vấn đề Mở (Open Issues)
 1.  **Hiện tượng Seq Scan khi bộ lọc quá khắt khe**: Trong một số trường hợp khi điều kiện lọc phân quyền trả về quá ít ứng viên (Ví dụ: phòng ban chỉ có 1-2 tài liệu), PostgreSQL có thể tự động quyết định quét tuần tự (Seq Scan) thay vì dùng chỉ mục HNSW vì tối ưu hơn về mặt toán học đối với tập dữ liệu nhỏ. Việc này là bình thường và không vi phạm kiến trúc, nhưng cần được giám sát hiệu năng thực tế.
 2.  **Cấu hình tối ưu HNSW**: Các tham số `m = 16` và `ef_construction = 64` có thể cần được tinh chỉnh nâng cao (Ví dụ: `m = 24`, `ef_construction = 128`) khi số lượng phân mảnh trong cơ sở dữ liệu vượt quá 100.000 chunks để đảm bảo độ chính xác tìm kiếm (Recall Rate).
+3.  **Độ trễ của LLM API và ảnh hưởng tới chỉ số SLA p95 < 500ms**: Cuộc gọi LLM API ngoài có timeout được thiết lập hợp lý ở mức 2000ms và chạy song song với tiến trình sinh vector câu hỏi. Tuy nhiên, tổng độ trễ của API tìm kiếm ngữ nghĩa sẽ bị chi phối bởi nhánh xử lý chậm nhất. Cần thực hiện benchmark tải thực tế với LLM API được chọn để bảo đảm không vi phạm SLA. Nếu API LLM thường xuyên đạt gần ngưỡng timeout, cần tối ưu hóa prompt hoặc hạ cấp xuống một mô hình LLM nhẹ/nhanh hơn.

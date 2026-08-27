@@ -13,7 +13,7 @@ public interface DocumentRepositoryCustom {
     int updateTotalChunks(UUID id, String workerId, int totalChunks, LocalDateTime now);
     int updateCheckpoint(UUID id, String workerId, int chunkIndex, LocalDateTime now);
     int updateRetryCount(UUID id, String workerId, LocalDateTime now);
-    int markCompleted(UUID id, String workerId, int totalChunks, LocalDateTime now);
+    int markCompleted(UUID id, String workerId, int totalChunks, int skippedChunks, LocalDateTime now);
     int markFailed(UUID id, String workerId, LocalDateTime now);
     int forceMarkFailed(UUID id, LocalDateTime now);
     int resetProcessingTasksToReady(LocalDateTime now);

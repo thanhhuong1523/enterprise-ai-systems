@@ -97,6 +97,7 @@ public class SecurityConfig {
                 // Documents: accessible by employee roles only
                 .requestMatchers("/api/v1/original-documents", "/api/v1/original-documents/**").hasAnyAuthority("ROLE_EMPLOYEE", "ROLE_DEPT_MANAGER", "ROLE_BOARD")
                 .requestMatchers("/api/v1/alias-documents", "/api/v1/alias-documents/**").hasAnyAuthority("ROLE_EMPLOYEE", "ROLE_DEPT_MANAGER", "ROLE_BOARD")
+                .requestMatchers("/api/v1/search").hasAnyAuthority("ROLE_EMPLOYEE", "ROLE_DEPT_MANAGER", "ROLE_BOARD")
 
                 // All other endpoints require authentication
                 .anyRequest().authenticated()

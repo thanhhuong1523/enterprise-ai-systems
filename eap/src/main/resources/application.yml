@@ -1,18 +1,21 @@
 server:
-  port: 9090
+  port: 8080
 
 spring:
+  autoconfigure:
+    exclude:
+      - org.springframework.ai.autoconfigure.vectorstore.pgvector.PgVectorStoreAutoConfiguration
   application:
     name: backend
   datasource:
-    url: ${DB_URL:jdbc:postgresql://localhost:5432/vcc_eap?currentSchema=public&stringtype=unspecified&connectTimeout=10&socketTimeout=30&tcpKeepAlive=true&reWriteBatchedInserts=true}
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/vcc_eap?currentSchema=public&stringtype=unspecified&tcpKeepAlive=true&reWriteBatchedInserts=true}
     username: ${DB_USERNAME:vcc_admin}
     password: ${DB_PASSWORD:secure_db_password}
     driver-class-name: org.postgresql.Driver
     hikari:
       pool-name: EAP-Hikari-Pool
-      maximum-pool-size: 50
-      minimum-idle: 10
+      maximum-pool-size: 10
+      minimum-idle: 2
       idle-timeout: 30000
       max-lifetime: 1800000
       keepalive-time: 30000
@@ -63,10 +66,18 @@ jwt:
   expiration-ms: 900000 # 15 minutes
   refresh-expiration-ms: 604800000 # 7 days
 
+gemini:
+  api-key: ${GEMINI_API_KEY:}
+  model: ${GEMINI_MODEL:gemini-3.6-flash}
+  base-url: ${GEMINI_BASE_URL:https://generativelanguage.googleapis.com/v1beta/openai/chat/completions}
+
+
 eap:
   upload:
     dir: ./eap-storage
     temp-dir: ./eap-storage/tmp
+  chunking:
+    paragraph-separator: "\\n\\n"
   retry:
     max-attempts: ${RETRY_MAX_ATTEMPTS:5}
     base-delay-ms: ${RETRY_BASE_DELAY_MS:350}
@@ -75,6 +86,12 @@ eap:
     cron: ${CLEANUP_CRON:0 0 2 * * *}
     temp-expiration-ms: ${CLEANUP_TEMP_EXPIRATION_MS:86400000} # 24 hours
     orphan-grace-period-ms: ${CLEANUP_ORPHAN_GRACE_PERIOD_MS:600000} # 10 minutes
+  rag:
+    top-k: 3
+  llm:
+    query-timeout-ms: 2000
+    chunk-timeout-ms: 40000
+    connect-timeout-ms: 1000
 
 logging:
   level:

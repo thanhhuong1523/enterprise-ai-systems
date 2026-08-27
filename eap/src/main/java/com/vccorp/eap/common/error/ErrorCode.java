@@ -16,7 +16,16 @@ public enum ErrorCode {
     ERR_DUPLICATE_DOCUMENT(HttpStatus.CONFLICT, "Tài liệu đã tồn tại trong phòng ban."),
     ERR_HASH_MISMATCH(HttpStatus.BAD_REQUEST, "Mã băm hash của tệp không khớp với cơ sở dữ liệu."),
     ERR_STORAGE_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "Lỗi đọc/ghi hệ thống tệp tin."),
-    ERR_OWNERSHIP_LOST(HttpStatus.CONFLICT, "Worker đã mất quyền sở hữu tác vụ.");
+    ERR_OWNERSHIP_LOST(HttpStatus.CONFLICT, "Worker đã mất quyền sở hữu tác vụ."),
+
+    // User
+    USER_NOT_FOUND(HttpStatus.NOT_FOUND, "Người dùng không tồn tại."),
+
+    // Department
+    DEPARTMENT_NOT_FOUND(HttpStatus.NOT_FOUND, "Phòng ban không tồn tại."),
+
+    // Embedding
+    EMBEDDING_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "Lỗi tạo vector nhúng.");
 
     private final HttpStatus httpStatus;
     private final String defaultMessage;

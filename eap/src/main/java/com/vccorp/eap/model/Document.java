@@ -74,12 +74,16 @@ public class Document {
     @Column(name = "total_chunks")
     private Integer totalChunks;
 
+    @Column(name = "skipped_chunks_count", nullable = false)
+    private Integer skippedChunksCount = 0;
+
     public Document() {}
 
     public Document(UUID id, String businessCode, String title, String fileReference, Long fileSize, String hash,
                     UUID ownerDepartmentId, UUID parentId, UUID creatorDepartmentId, UUID createdBy,
                     LocalDateTime createdAt, LocalDateTime updatedAt, LocalDateTime deletedAt,
-                    String status, String workerId, Integer retryCount, Integer lastCompletedChunk, Integer totalChunks) {
+                    String status, String workerId, Integer retryCount, Integer lastCompletedChunk, Integer totalChunks,
+                    Integer skippedChunksCount) {
         this.id = id;
         this.businessCode = businessCode;
         this.title = title;
@@ -98,6 +102,7 @@ public class Document {
         this.retryCount = retryCount;
         this.lastCompletedChunk = lastCompletedChunk;
         this.totalChunks = totalChunks;
+        this.skippedChunksCount = skippedChunksCount != null ? skippedChunksCount : 0;
     }
 
     public boolean isAlias() {
@@ -146,6 +151,8 @@ public class Document {
     public void setLastCompletedChunk(Integer lastCompletedChunk) { this.lastCompletedChunk = lastCompletedChunk; }
     public Integer getTotalChunks() { return totalChunks; }
     public void setTotalChunks(Integer totalChunks) { this.totalChunks = totalChunks; }
+    public Integer getSkippedChunksCount() { return skippedChunksCount; }
+    public void setSkippedChunksCount(Integer skippedChunksCount) { this.skippedChunksCount = skippedChunksCount != null ? skippedChunksCount : 0; }
 
     @Override
     public String toString() {
@@ -184,6 +191,7 @@ public class Document {
         private Integer retryCount;
         private Integer lastCompletedChunk;
         private Integer totalChunks;
+        private Integer skippedChunksCount = 0;
 
         public DocumentBuilder id(UUID id) {
             this.id = id;
@@ -275,11 +283,16 @@ public class Document {
             return this;
         }
 
+        public DocumentBuilder skippedChunksCount(Integer skippedChunksCount) {
+            this.skippedChunksCount = skippedChunksCount;
+            return this;
+        }
+
         public Document build() {
             return new Document(id, businessCode, title, fileReference, fileSize, hash,
                     ownerDepartmentId, parentId, creatorDepartmentId, createdBy,
                     createdAt, updatedAt, deletedAt, status, workerId, retryCount,
-                    lastCompletedChunk, totalChunks);
+                    lastCompletedChunk, totalChunks, skippedChunksCount);
         }
     }
 }

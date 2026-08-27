@@ -50,7 +50,7 @@ public class FileStorageServiceImpl implements FileStorageService {
         try {
             digest = MessageDigest.getInstance("SHA-256");
         } catch (NoSuchAlgorithmException e) {
-            throw new IOException("SHA-256 algorithm not available", e);
+            throw new IllegalStateException("SHA-256 algorithm not available on this JVM", e);
         }
 
         long fileSize = 0;
@@ -167,7 +167,7 @@ public class FileStorageServiceImpl implements FileStorageService {
         try {
             digest = MessageDigest.getInstance("SHA-256");
         } catch (NoSuchAlgorithmException e) {
-            throw new IOException("SHA-256 algorithm not available", e);
+            throw new IllegalStateException("SHA-256 algorithm not available on this JVM", e);
         }
         try (InputStream fis = Files.newInputStream(path)) {
             byte[] buffer = new byte[BUFFER_SIZE];

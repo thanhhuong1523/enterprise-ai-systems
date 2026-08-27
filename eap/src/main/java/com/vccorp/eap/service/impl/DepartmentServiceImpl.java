@@ -11,6 +11,7 @@ import com.vccorp.eap.repository.DepartmentRepository;
 import com.vccorp.eap.repository.DocumentRepository;
 import com.vccorp.eap.repository.UserRepository;
 import com.vccorp.eap.service.DepartmentService;
+import com.vccorp.eap.service.mapper.DepartmentMapper;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -25,27 +26,21 @@ public class DepartmentServiceImpl implements DepartmentService {
     private final DepartmentRepository departmentRepository;
     private final UserRepository userRepository;
     private final DocumentRepository documentRepository;
+    private final DepartmentMapper departmentMapper;
 
     public DepartmentServiceImpl(DepartmentRepository departmentRepository,
                                   UserRepository userRepository,
-                                  DocumentRepository documentRepository) {
+                                  DocumentRepository documentRepository,
+                                  DepartmentMapper departmentMapper) {
         this.departmentRepository = departmentRepository;
         this.userRepository = userRepository;
         this.documentRepository = documentRepository;
+        this.departmentMapper = departmentMapper;
     }
 
     private Department findDepartmentById(UUID id) {
         return departmentRepository.findById(id)
-                .orElseThrow(() -> new BusinessException(ErrorCode.VALIDATION_ERROR, "Phòng ban không tồn tại."));
-    }
-
-    private DepartmentResponse mapToResponse(Department dept) {
-        if (dept == null) return null;
-        return DepartmentResponse.builder(dept.getId(), dept.getCode(), dept.getName())
-                .description(dept.getDescription())
-                .createdAt(dept.getCreatedAt())
-                .updatedAt(dept.getUpdatedAt())
-                .build();
+                .orElseThrow(() -> new BusinessException(ErrorCode.DEPARTMENT_NOT_FOUND));
     }
 
     @Override
@@ -90,21 +85,21 @@ public class DepartmentServiceImpl implements DepartmentService {
                 .description(description)
                 .build();
 
-        return mapToResponse(departmentRepository.save(department));
+        return departmentMapper.mapToResponse(departmentRepository.save(department));
     }
 
     @Override
     @Transactional(readOnly = true)
     public List<DepartmentResponse> listDepartments() {
         return departmentRepository.findAll().stream()
-                .map(this::mapToResponse)
+                .map(departmentMapper::mapToResponse)
                 .collect(Collectors.toList());
     }
 
     @Override
     @Transactional(readOnly = true)
     public DepartmentResponse getDepartmentDetail(UUID id) {
-        return mapToResponse(findDepartmentById(id));
+        return departmentMapper.mapToResponse(findDepartmentById(id));
     }
 
     @Override
@@ -143,7 +138,7 @@ public class DepartmentServiceImpl implements DepartmentService {
             dept.setDescription(desc);
         }
 
-        return mapToResponse(departmentRepository.save(dept));
+        return departmentMapper.mapToResponse(departmentRepository.save(dept));
     }
 
     @Override
