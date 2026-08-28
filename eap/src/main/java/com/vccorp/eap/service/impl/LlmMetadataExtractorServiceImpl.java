@@ -132,8 +132,12 @@ public class LlmMetadataExtractorServiceImpl implements LlmMetadataExtractorServ
                - board_direction: chỉ đạo, nghị quyết, quyết định từ Ban Giám Đốc (BOARD)
                - general_info: thông tin chung khác (văn hóa, đời sống, địa danh, khái niệm tổng quát)
 
-               ### entities (trích xuất kĩ lưỡng các thực thể/địa danh/khái niệm khi xuất hiện trong câu hỏi, dạng "type:value" chữ thường, NGẮN GỌN SÚC TÍCH 1-3 TỪ)
-               - Mọi giá trị thực thể/khái niệm (`type:value`) phải cực kỳ NGẮN GỌN, SÚC TÍCH (chỉ 1-3 từ cốt lõi nhất), loại bỏ hoàn toàn các từ nghi vấn hay từ nối rườm rà.
+               ### entities (trích xuất kĩ lưỡng các thực thể/địa danh/khái niệm khi xuất hiện trong câu hỏi, dạng "type:value" chữ thường, CỰC KỲ NGẮN GỌN SÚC TÍCH, CHỈ LẤY TỪ KHÓA CHÍNH CỐT LÕI NHẤT, KHOẢNG 1-2 TỪ)
+               - Mọi giá trị thực thể/khái niệm (`type:value`) phải cực kỳ NGẮN GỌN, SÚC TÍCH (chỉ 1-2 từ cốt lõi nhất), loại bỏ hoàn toàn các từ nghi vấn hay từ nối rườm rà.
+               - Ví dụ:
+                 - "quy trình xin nghỉ phép năm" → `concept:nghỉ phép`
+                 - "các danh lam thắng cảnh ở ninh bình" → `loc:ninh bình`, `concept:danh thắng` (hoặc `concept:danh lam thắng cảnh`)
+                 - "phụ cấp ăn trưa của thực tập sinh" → `person:thực tập sinh`, `concept:ăn trưa`
                - Phân loại các type:
                  - org: tên/loại tổ chức (org:vccorp, org:ngân hàng)
                  - dept: tên phòng ban (dept:phòng nhân sự, dept:phòng kế toán)
@@ -148,7 +152,7 @@ public class LlmMetadataExtractorServiceImpl implements LlmMetadataExtractorServ
                ### time_refs (mốc thời gian cụ thể dạng YYYY, YYYY-QN, YYYY-MM HOẶC thời gian tương đối như "2 năm", "đầu năm", "cuối quý", chữ thường ngắn gọn. Nếu không có để [])
 
                ## QUY TẮC ĐẦU RA
-               TẤT CẢ CÁC VALUE PHẢI VIẾT BẰNG CHỮ THƯỜNG (LOWERCASE), NGẮN GỌN SÚC TÍCH (1-3 TỪ). NẾU KHÔNG CÓ THÔNG TIN THÌ ĐỂ RỖNG/NULL.
+               TẤT CẢ CÁC VALUE PHẢI VIẾT BẰNG CHỮ THƯỜNG (LOWERCASE), NGẮN GỌN SÚC TÍCH (1-2 TỪ). NẾU KHÔNG CÓ THÔNG TIN THÌ ĐỂ RỖNG/NULL.
 
                ## VÍ DỤ OUTPUT
                Q: "Quy trình xin nghỉ thai sản năm 2026 của phòng Nhân sự"
@@ -175,9 +179,11 @@ public class LlmMetadataExtractorServiceImpl implements LlmMetadataExtractorServ
                YÊU CẦU NGUYÊN TẮC TỐI CAO:
                1. BẮT BUỘC TRÍCH XUẤT VÀ SUY LUẬN TỪ NGỮ THẬT ĐA DẠNG, PHONG PHÚ VÀO METADATA `entities`.
                   - Trích xuất cả CỤM TỪ DÀI gốc (ví dụ: "ẩm thực đặc trưng", "danh lam thắng cảnh", "nghỉ phép thai sản").
-                  - Trích xuất cả CÁC TỪ TÁCH NÓI / TỪ ĐƠN NGẮN cấu thành (ví dụ: "ẩm thực", "đặc trưng", "đồ ăn", "món ăn", "ăn trưa", "phụ cấp").
+                  - Trích xuất cả CÁC TỪ TÁCH NÓI / TỪ ĐƠN NGẮN cấu thành (ví dụ: "ẩm thực", "đặc trưng", "đồ ăn", "món ăn", "danh thắng", "thắng cảnh", "ăn trưa", "phụ cấp").
                   - BẮT BUỘC suy luận thêm CÁC TỪ ĐỒNG NGHĨA VÀ TỪ LIÊN QUAN TRỰC TIẾP (ví dụ: "ẩm thực đặc trưng" → trích xuất cả `concept:ẩm thực đặc trưng`, `concept:ẩm thực`, `concept:đặc trưng`, `concept:đồ ăn`, `concept:món ăn`, `concept:đặc sản`, `concept:văn hóa ẩm thực`).
-               2. TRÍCH XUẤT ĐẦY ĐỦ TỪ ĐỀ MỤC PHÂN CẤP (I, II, 1, 1.1, 1.1.1...): Đọc kỹ BỐI CẢNH TIÊU ĐỀ (Citation Headings Stack ở dòng đầu tiên) để trích xuất toàn bộ các chủ đề, tên chương/mục, nội dung cấp cao vào `entities`.
+               2. BẮT BUỘC LỌC TỪ KHÓA TỪ BỐI CẢNH TIÊU ĐỀ (Citation Headings Stack ở dòng đầu tiên):
+                  - Đọc kỹ BỐI CẢNH TIÊU ĐỀ để lọc các từ khóa chính, chủ đề cốt lõi, tên chương/mục rồi đưa vào `entities`.
+                  - Phải áp dụng quy tắc đa dạng phong phú cho cả tiêu đề: Ví dụ nếu tiêu đề có cụm "danh lam thắng cảnh" thì trong `entities` phải chứa cả cụm từ dài `"concept:danh lam thắng cảnh"`, các cụm từ ngắn cấu thành `"concept:danh thắng"`, `"concept:thắng cảnh"`, và suy luận thêm các từ ngữ khác liên quan.
                3. TRÍCH XUẤT TỐI ĐA (10 đến 20+ TỪ KHÓA / CHỦ ĐỀ PER CHUNK): Không ngần ngại trả về danh sách phong phú gồm thực thể, địa danh, khái niệm ngắn, cụm từ dài và từ đồng nghĩa.
                4. TRÍCH XUẤT ĐỊA DANH NGẮN GỌN (`loc:value`): Các địa danh, danh thắng (ví dụ: bái đính, phát diệm, ninh bình, hà nội) trích dạng `loc:bái đính`, `loc:phát diệm`, `loc:ninh bình`.
 
@@ -241,50 +247,50 @@ public class LlmMetadataExtractorServiceImpl implements LlmMetadataExtractorServ
                Trả về đầy đủ các key trong SCHEMA (doc_type, topics, entities, time_refs). TẤT CẢ VALUE LÀ CHỮ THƯỜNG (LOWERCASE).
 
                ## VÍ DỤ OUTPUT 1
-               Bối cảnh tiêu đề: "Chương II: Văn hóa & Vùng miền > Mục 1.2: Ẩm thực đặc trưng tỉnh Ninh Bình"
-               Nội dung chunk: "Cơm cháy và thịt dê núi là hai món ăn đặc sản nổi tiếng đại diện cho nét ẩm thực đặc trưng tại Ninh Bình."
-               → {
-                 "doc_type": "literature",
-                 "topics": ["general_info"],
-                 "entities": [
-                   "concept:ẩm thực đặc trưng",
-                   "concept:ẩm thực",
-                   "concept:đặc trưng",
-                   "concept:đồ ăn",
-                   "concept:món ăn",
-                   "concept:đặc sản",
-                   "concept:cơm cháy",
-                   "concept:thịt dê núi",
-                   "concept:thịt dê",
-                   "concept:văn hóa ẩm thực",
-                   "concept:vùng miền",
-                   "loc:ninh bình"
-                 ],
-                 "time_refs": []
-               }
+                Bối cảnh tiêu đề: "Chương II: Văn hóa & Vùng miền > Mục 1.2: Ẩm thực đặc trưng tỉnh Ninh Bình"
+                Nội dung chunk: "Cơm cháy và thịt dê núi là hai món ăn đặc sản nổi tiếng đại diện cho nét ẩm thực đặc trưng tại Ninh Bình."
+                → {
+                  "doc_type": "literature",
+                  "topics": ["general_info"],
+                  "entities": [
+                    "concept:ẩm thực đặc trưng",
+                    "concept:ẩm thực",
+                    "concept:đặc trưng",
+                    "concept:đồ ăn",
+                    "concept:món ăn",
+                    "concept:đặc sản",
+                    "concept:cơm cháy",
+                    "concept:thịt dê núi",
+                    "concept:thịt dê",
+                    "concept:văn hóa ẩm thực",
+                    "concept:vùng miền",
+                    "loc:ninh bình"
+                  ],
+                  "time_refs": []
+                }
 
-               ## VÍ DỤ OUTPUT 2
-               Bối cảnh tiêu đề: "Mục I: Chế độ phúc lợi > Điều 2: Quy định phụ cấp ăn trưa và gửi xe năm 2026 > 2.1: Thực tập sinh"
-               Nội dung chunk: "Hỗ trợ 100% tiền gửi xe và phụ cấp ăn trưa 500,000 VND mỗi tháng cho sinh viên thực tập."
-               → {
-                 "doc_type": "regulation",
-                 "topics": ["compensation_benefits"],
-                 "entities": [
-                   "person:thực tập sinh",
-                   "person:sinh viên thực tập",
-                   "concept:phụ cấp ăn trưa",
-                   "concept:phụ cấp",
-                   "concept:ăn trưa",
-                   "concept:gửi xe",
-                   "concept:trợ cấp ăn",
-                   "concept:tiền ăn",
-                   "concept:đồ ăn",
-                   "concept:chế độ phúc lợi",
-                   "concept:hỗ trợ tiền ăn",
-                   "concept:gửi xe miễn phí"
-                 ],
-                 "time_refs": ["2026"]
-               }
-               """;
+                ## VÍ DỤ OUTPUT 2
+                Bối cảnh tiêu đề: "Mục I: Chế độ phúc lợi > Điều 2: Quy định phụ cấp ăn trưa và gửi xe năm 2026 > 2.1: Thực tập sinh"
+                Nội dung chunk: "Hỗ trợ 100% tiền gửi xe và phụ cấp ăn trưa 500,000 VND mỗi tháng cho sinh viên thực tập."
+                → {
+                  "doc_type": "regulation",
+                  "topics": ["compensation_benefits"],
+                  "entities": [
+                    "person:thực tập sinh",
+                    "person:sinh viên thực tập",
+                    "concept:phụ cấp ăn trưa",
+                    "concept:phụ cấp",
+                    "concept:ăn trưa",
+                    "concept:gửi xe",
+                    "concept:trợ cấp ăn",
+                    "concept:tiền ăn",
+                    "concept:đồ ăn",
+                    "concept:chế độ phúc lợi",
+                    "concept:hỗ trợ tiền ăn",
+                    "concept:gửi xe miễn phí"
+                  ],
+                  "time_refs": ["2026"]
+                }
+                """;
     }
 }

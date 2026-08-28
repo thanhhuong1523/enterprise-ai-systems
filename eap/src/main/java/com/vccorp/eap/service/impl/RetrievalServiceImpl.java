@@ -32,6 +32,9 @@ public class RetrievalServiceImpl implements RetrievalService {
     private final ChunkRepository chunkRepository;
     private final RagAnswerGeneratorService ragAnswerGeneratorService;
 
+    @Value("${eap.rag.similarity-threshold:0.0}")
+    private double similarityThreshold;
+
     public RetrievalServiceImpl(
             LlmMetadataExtractorService llmMetadataExtractorService,
             EmbeddingService embeddingService,
@@ -86,28 +89,24 @@ public class RetrievalServiceImpl implements RetrievalService {
                 .orElse(UUID.fromString("00000000-0000-0000-0000-000000000000"));
 
         // 3. Short-circuit: 
-        // a) Nếu LLM không trích xuất được value metadata nào từ câu hỏi -> Trả về không tìm thấy ngay.
-        // b) Nếu trích xuất được metadata nhưng không có ứng viên nào khớp trong DB -> Trả về không tìm thấy ngay.
-        if (metadataFilter == null || metadataFilter.isEmpty()) {
-            log.info("Short-circuit: không trích xuất được metadata filter nào từ câu hỏi cho user {}",
-                    currentUser.getUsername());
-            return new RagChatResponse("Không tìm thấy kết quả phù hợp.", Collections.emptyList());
-        }
-
-        boolean hasCandidate = chunkRepository.existsCandidateWithMetadata(
-                metadataFilter, currentUser.getDepartmentId(), boardDeptId);
-        if (!hasCandidate) {
-            log.info("Short-circuit: không có phân đoạn nào khớp metadata filter cho user {}",
-                    currentUser.getUsername());
-            return new RagChatResponse("Không tìm thấy kết quả phù hợp.", Collections.emptyList());
+        // Nếu trích xuất được metadata nhưng không có ứng viên nào khớp trong DB -> Trả về không tìm thấy ngay.
+        if (metadataFilter != null && !metadataFilter.isEmpty()) {
+            boolean hasCandidate = chunkRepository.existsCandidateWithMetadata(
+                    metadataFilter, currentUser.getDepartmentId(), boardDeptId);
+            if (!hasCandidate) {
+                log.info("Short-circuit: không có phân đoạn nào khớp metadata filter cho user {}",
+                        currentUser.getUsername());
+                return new RagChatResponse("Không tìm thấy kết quả phù hợp.", Collections.emptyList());
+            }
         }
 
         // 4. Đóng gói context và tìm kiếm tại Database (sau khi LLM filter, xếp hạng theo vector cosine)
         SearchContext context = new SearchContext(message, queryVector, metadataFilter, currentUser.getDepartmentId(), boardDeptId);
         List<ChunkSearchResult> searchResults = vectorSearchService.searchWithAuth(context);
 
-        // 5. Map sang typed DTO cho API Response (không áp dụng threshold điểm cosine)
+        // 5. Map sang typed DTO cho API Response (áp dụng threshold điểm cosine)
         List<ChunkResultDto> chunks = searchResults.stream()
+                .filter(res -> res.similarityScore() >= similarityThreshold)
                 .map(res -> {
                     Object rawPage = res.metadata().get("page_number");
                     Integer pageNumber = null;

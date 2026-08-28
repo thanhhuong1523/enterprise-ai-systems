@@ -68,7 +68,7 @@ jwt:
 
 gemini:
   api-key: ${GEMINI_API_KEY:}
-  model: ${GEMINI_MODEL:gemini-3.6-flash}
+  model: ${GEMINI_MODEL:gemini-3.5-flash-lite}
   base-url: ${GEMINI_BASE_URL:https://generativelanguage.googleapis.com/v1beta/openai/chat/completions}
 
 
@@ -89,7 +89,7 @@ eap:
   rag:
     top-k: 3
   llm:
-    query-timeout-ms: 2000
+    query-timeout-ms: ${EAP_LLM_QUERY_TIMEOUT_MS:15000}
     chunk-timeout-ms: 40000
     connect-timeout-ms: 1000
 
