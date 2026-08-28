@@ -1,18 +1,5 @@
 package com.vccorp.eap.worker.impl;
 
-import com.vccorp.eap.common.error.ErrorCode;
-import com.vccorp.eap.common.exception.BusinessException;
-import com.vccorp.eap.model.Document;
-import com.vccorp.eap.repository.DocumentRepository;
-import com.vccorp.eap.service.DocumentTextExtractor;
-import com.vccorp.eap.worker.CheckpointService;
-import com.vccorp.eap.worker.DocumentChunkProcessor;
-import com.vccorp.eap.service.ParagraphChunker;
-import com.vccorp.eap.worker.WorkerExecutor;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.slf4j.MDC;
-import org.springframework.stereotype.Service;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
@@ -20,6 +7,21 @@ import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
+import org.springframework.stereotype.Service;
+
+import com.vccorp.eap.common.error.ErrorCode;
+import com.vccorp.eap.common.exception.BusinessException;
+import com.vccorp.eap.model.Document;
+import com.vccorp.eap.repository.DocumentRepository;
+import com.vccorp.eap.service.document.DocumentTextExtractor;
+import com.vccorp.eap.service.document.ParagraphChunker;
+import com.vccorp.eap.worker.CheckpointService;
+import com.vccorp.eap.worker.DocumentChunkProcessor;
+import com.vccorp.eap.worker.WorkerExecutor;
 
 /**
  * Lớp thực thi của WorkerExecutor.
@@ -127,9 +129,9 @@ public class WorkerExecutorImpl implements WorkerExecutor {
         }
 
 
-        List<com.vccorp.eap.dto.ChunkDraft> drafts;
+        List<com.vccorp.eap.dto.document.ChunkDraft> drafts;
         if ("application/pdf".equals(mimeType)) {
-            java.util.List<com.vccorp.eap.dto.PageContent> pages = documentTextExtractor.extractTextByPage(filePath);
+            java.util.List<com.vccorp.eap.dto.document.PageContent> pages = documentTextExtractor.extractTextByPage(filePath);
             drafts = paragraphChunker.chunkByPage(pages);
             log.info("PDF '{}': dùng page-aware chunking, {} trang → {} chunks", taskId, pages.size(), drafts.size());
         } else {
@@ -159,7 +161,7 @@ public class WorkerExecutorImpl implements WorkerExecutor {
             }
 
             // Process chunk with internal retry up to 3 times
-            com.vccorp.eap.dto.ChunkDraft draft = drafts.get(k - 1);
+            com.vccorp.eap.dto.document.ChunkDraft draft = drafts.get(k - 1);
             boolean success = executeChunkWithRetry(taskId, k, draft.content(), draft.headingContext(), draft.pageNumber());
             if (!success) {
                 skippedChunks++;

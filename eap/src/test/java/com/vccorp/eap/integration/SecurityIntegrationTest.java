@@ -1,6 +1,6 @@
 package com.vccorp.eap.integration;
 
-import com.vccorp.eap.service.JwtService;
+import com.vccorp.eap.service.auth.JwtService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;

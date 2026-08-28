@@ -1,10 +1,10 @@
 package com.vccorp.eap.integration;
 
-import com.vccorp.eap.dto.TaskClaimedResult;
+import com.vccorp.eap.dto.document.TaskClaimedResult;
 import com.vccorp.eap.model.Document;
 import com.vccorp.eap.recovery.RecoveryService;
 import com.vccorp.eap.repository.DocumentRepository;
-import com.vccorp.eap.service.DocumentTextExtractor;
+import com.vccorp.eap.service.document.DocumentTextExtractor;
 import com.vccorp.eap.worker.CheckpointService;
 import com.vccorp.eap.worker.DocumentChunkProcessor;
 import com.vccorp.eap.worker.WorkerExecutor;

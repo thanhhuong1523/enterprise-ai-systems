@@ -1,14 +1,14 @@
 package com.vccorp.eap.integration;
 
-import com.vccorp.eap.dto.RagChatRequest;
-import com.vccorp.eap.dto.RagChatResponse;
-import com.vccorp.eap.dto.ChunkResultDto;
+import com.vccorp.eap.dto.search.RagChatRequest;
+import com.vccorp.eap.dto.search.RagChatResponse;
+import com.vccorp.eap.dto.document.ChunkResultDto;
 import com.vccorp.eap.enums.Role;
 import com.vccorp.eap.model.Chunk;
 import com.vccorp.eap.model.User;
 import com.vccorp.eap.repository.ChunkRepository;
-import com.vccorp.eap.service.LlmMetadataExtractorService;
-import com.vccorp.eap.service.RetrievalService;
+import com.vccorp.eap.service.document.LlmMetadataExtractorService;
+import com.vccorp.eap.service.search.RetrievalService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -19,6 +19,8 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
+import com.vccorp.eap.service.embedding.EmbeddingService;
+import com.vccorp.eap.service.helper.LlmClient;
 
 @SpringBootTest
 @Transactional
@@ -34,7 +36,7 @@ public class RagSearchDemoIntegrationTest {
     private com.vccorp.eap.repository.DocumentRepository documentRepository;
 
     @Autowired
-    private com.vccorp.eap.service.EmbeddingService embeddingService;
+    private com.vccorp.eap.service.embedding.EmbeddingService embeddingService;
 
     @MockBean
     private LlmMetadataExtractorService llmMetadataExtractorService;

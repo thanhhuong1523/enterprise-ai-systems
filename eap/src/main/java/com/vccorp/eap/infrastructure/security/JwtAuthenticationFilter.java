@@ -2,7 +2,7 @@ package com.vccorp.eap.infrastructure.security;
 
 import com.vccorp.eap.enums.Role;
 import com.vccorp.eap.model.User;
-import com.vccorp.eap.service.JwtService;
+import com.vccorp.eap.service.auth.JwtService;
 import io.jsonwebtoken.Claims;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -78,6 +78,11 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         String bearerToken = request.getHeader("Authorization");
         if (StringUtils.hasText(bearerToken) && bearerToken.startsWith("Bearer ")) {
             return bearerToken.substring(7);
+        }
+        // Fallback for query parameter token (e.g. for SSE EventSource GET requests)
+        String tokenParam = request.getParameter("token");
+        if (StringUtils.hasText(tokenParam)) {
+            return tokenParam;
         }
         return null;
     }

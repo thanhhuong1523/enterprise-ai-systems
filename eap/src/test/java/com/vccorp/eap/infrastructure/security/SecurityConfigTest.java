@@ -1,11 +1,11 @@
 package com.vccorp.eap.infrastructure.security;
 
-import com.vccorp.eap.controller.PingController;
-import com.vccorp.eap.controller.UserController;
+import com.vccorp.eap.controller.ping.PingController;
+import com.vccorp.eap.controller.user.UserController;
 import com.vccorp.eap.enums.Role;
 import com.vccorp.eap.repository.UserRepository;
-import com.vccorp.eap.service.JwtService;
-import com.vccorp.eap.service.UserService;
+import com.vccorp.eap.service.auth.JwtService;
+import com.vccorp.eap.service.user.UserService;
 import io.jsonwebtoken.Claims;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -21,6 +21,7 @@ import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import com.vccorp.eap.service.cache.RedisService;
 
 @WebMvcTest(controllers = {UserController.class, PingController.class})
 @Import({SecurityConfig.class, JwtAuthenticationFilter.class})
@@ -39,7 +40,7 @@ public class SecurityConfigTest {
     private UserService userService;
 
     @MockBean
-    private com.vccorp.eap.service.RedisService redisService;
+    private com.vccorp.eap.service.cache.RedisService redisService;
 
     @Test
     public void requestWithoutToken_Returns401() throws Exception {

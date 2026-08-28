@@ -1,6 +1,6 @@
 package com.vccorp.eap.repository;
 
-import com.vccorp.eap.dto.TaskClaimedResult;
+import com.vccorp.eap.dto.document.TaskClaimedResult;
 import com.vccorp.eap.model.Document;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;

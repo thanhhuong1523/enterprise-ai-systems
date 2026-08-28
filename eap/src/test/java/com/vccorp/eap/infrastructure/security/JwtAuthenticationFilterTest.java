@@ -2,7 +2,7 @@ package com.vccorp.eap.infrastructure.security;
 
 import com.vccorp.eap.enums.Role;
 import com.vccorp.eap.model.User;
-import com.vccorp.eap.service.JwtService;
+import com.vccorp.eap.service.auth.JwtService;
 import io.jsonwebtoken.Claims;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.http.HttpServletRequest;

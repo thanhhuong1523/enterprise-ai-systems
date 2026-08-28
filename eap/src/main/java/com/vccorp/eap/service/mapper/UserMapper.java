@@ -1,8 +1,9 @@
 package com.vccorp.eap.service.mapper;
 
-import com.vccorp.eap.dto.UserResponse;
-import com.vccorp.eap.model.User;
 import org.springframework.stereotype.Component;
+
+import com.vccorp.eap.dto.user.UserResponse;
+import com.vccorp.eap.model.User;
 
 /**
  * Mapper chịu trách nhiệm chuyển đổi User entity sang UserResponse DTO.

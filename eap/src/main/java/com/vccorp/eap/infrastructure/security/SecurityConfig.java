@@ -86,6 +86,7 @@ public class SecurityConfig {
                 .requestMatchers("/api/v1/auth/login", "/api/v1/auth/refresh", "/api/v1/auth/logout", "/api/v1/ping").permitAll()
                 .requestMatchers("/v3/api-docs", "/v3/api-docs/**", "/v3/api-docs.yaml", "/swagger-ui/**", "/swagger-ui.html").permitAll()
 
+
                 // Departments: GET is accessible by any authenticated user (needed for dropdowns in DocumentsPage),
                 // while POST/PUT/DELETE requires SYSTEM_ADMIN
                 .requestMatchers(HttpMethod.GET, "/api/v1/departments", "/api/v1/departments/**").authenticated()
@@ -97,7 +98,7 @@ public class SecurityConfig {
                 // Documents: accessible by employee roles only
                 .requestMatchers("/api/v1/original-documents", "/api/v1/original-documents/**").hasAnyAuthority("ROLE_EMPLOYEE", "ROLE_DEPT_MANAGER", "ROLE_BOARD")
                 .requestMatchers("/api/v1/alias-documents", "/api/v1/alias-documents/**").hasAnyAuthority("ROLE_EMPLOYEE", "ROLE_DEPT_MANAGER", "ROLE_BOARD")
-                .requestMatchers("/api/v1/search").hasAnyAuthority("ROLE_EMPLOYEE", "ROLE_DEPT_MANAGER", "ROLE_BOARD")
+                .requestMatchers("/api/v1/search").hasAnyAuthority("SYSTEM_ADMIN", "ROLE_EMPLOYEE", "ROLE_DEPT_MANAGER", "ROLE_BOARD")
 
                 // All other endpoints require authentication
                 .anyRequest().authenticated()

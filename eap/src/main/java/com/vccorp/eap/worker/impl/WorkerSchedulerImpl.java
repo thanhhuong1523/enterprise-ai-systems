@@ -1,6 +1,6 @@
 package com.vccorp.eap.worker.impl;
 
-import com.vccorp.eap.dto.TaskClaimedResult;
+import com.vccorp.eap.dto.document.TaskClaimedResult;
 import com.vccorp.eap.repository.DocumentRepository;
 import com.vccorp.eap.worker.WorkerExecutor;
 import com.vccorp.eap.worker.WorkerScheduler;

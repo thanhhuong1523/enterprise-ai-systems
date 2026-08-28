@@ -1,7 +1,7 @@
 package com.vccorp.eap.service;
 
 import com.vccorp.eap.repository.DocumentRepository;
-import com.vccorp.eap.service.impl.DocumentCleanupJob;
+import com.vccorp.eap.service.document.impl.DocumentCleanupJob;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;

@@ -3,8 +3,8 @@ package com.vccorp.eap.service;
 import com.vccorp.eap.common.error.ErrorCode;
 import com.vccorp.eap.common.exception.BusinessException;
 import com.vccorp.eap.common.exception.ConcurrentUploadTimeoutException;
-import com.vccorp.eap.dto.CreateAliasRequest;
-import com.vccorp.eap.dto.DocumentResponse;
+import com.vccorp.eap.dto.document.CreateAliasRequest;
+import com.vccorp.eap.dto.document.DocumentResponse;
 import com.vccorp.eap.enums.Role;
 import com.vccorp.eap.model.Department;
 import com.vccorp.eap.model.Document;
@@ -15,7 +15,7 @@ import com.vccorp.eap.service.allocator.BusinessCodeAllocator;
 import com.vccorp.eap.service.coordinator.DocumentUploadCoordinator;
 import com.vccorp.eap.service.helper.DeduplicationQueryResult;
 import com.vccorp.eap.service.helper.DocumentDeduplicationHelper;
-import com.vccorp.eap.service.impl.DocumentServiceImpl;
+import com.vccorp.eap.service.document.impl.DocumentServiceImpl;
 import com.vccorp.eap.service.lock.DocumentAdvisoryLockHandler;
 import com.vccorp.eap.service.storage.FileStorageService;
 import com.vccorp.eap.service.storage.SinglePassStorageResult;
@@ -46,6 +46,10 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
+import com.vccorp.eap.service.mapper.DocumentMapper;
+import com.vccorp.eap.service.helper.DocumentDeduplicationManager;
+import com.vccorp.eap.service.validation.UploadValidator;
+import com.vccorp.eap.service.validation.impl.UploadValidatorImpl;
 
 @ExtendWith(MockitoExtension.class)
 public class DocumentServiceTest {

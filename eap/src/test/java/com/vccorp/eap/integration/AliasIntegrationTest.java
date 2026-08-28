@@ -1,13 +1,13 @@
 package com.vccorp.eap.integration;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.vccorp.eap.dto.CreateAliasRequest;
+import com.vccorp.eap.dto.document.CreateAliasRequest;
 import com.vccorp.eap.enums.Role;
 import com.vccorp.eap.model.Department;
 import com.vccorp.eap.model.Document;
 import com.vccorp.eap.repository.DepartmentRepository;
 import com.vccorp.eap.repository.DocumentRepository;
-import com.vccorp.eap.service.JwtService;
+import com.vccorp.eap.service.auth.JwtService;
 import io.jsonwebtoken.Claims;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;

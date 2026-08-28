@@ -5,7 +5,7 @@ import com.vccorp.eap.common.exception.BusinessException;
 import com.vccorp.eap.enums.Role;
 import com.vccorp.eap.model.User;
 import com.vccorp.eap.repository.UserRepository;
-import com.vccorp.eap.service.impl.UserServiceImpl;
+import com.vccorp.eap.service.user.impl.UserServiceImpl;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -18,6 +18,7 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.when;
+import com.vccorp.eap.service.cache.RedisService;
 
 @ExtendWith(MockitoExtension.class)
 public class UserServiceTest {

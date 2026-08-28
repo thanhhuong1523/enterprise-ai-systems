@@ -1,14 +1,19 @@
 package com.vccorp.eap.repository;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.vccorp.eap.dto.ChunkSearchResult;
-import com.vccorp.eap.dto.SearchContext;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Repository;
 
-import java.util.*;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.vccorp.eap.dto.document.ChunkSearchResult;
+import com.vccorp.eap.dto.search.SearchContext;
 
 @Repository
 public class ChunkRepositoryCustomImpl implements ChunkRepositoryCustom {
@@ -33,7 +38,7 @@ public class ChunkRepositoryCustomImpl implements ChunkRepositoryCustom {
         if (context.metadataFilter() != null && !context.metadataFilter().isEmpty()) {
             try {
                 metadataFilterJson = objectMapper.writeValueAsString(context.metadataFilter());
-            } catch (Exception e) {
+            } catch (JsonProcessingException e) {
                 // ignore
             }
         }
@@ -89,7 +94,7 @@ public class ChunkRepositoryCustomImpl implements ChunkRepositoryCustom {
             if (metaStr != null && !metaStr.isEmpty()) {
                 try {
                     metaMap = objectMapper.readValue(metaStr, Map.class);
-                } catch (Exception e) {
+                } catch (JsonProcessingException e) {
                     // ignore
                 }
             }
@@ -110,7 +115,7 @@ public class ChunkRepositoryCustomImpl implements ChunkRepositoryCustom {
         String metadataFilterJson;
         try {
             metadataFilterJson = objectMapper.writeValueAsString(metadataFilter);
-        } catch (Exception e) {
+        } catch (JsonProcessingException e) {
             return true; // fail-open
         }
 
