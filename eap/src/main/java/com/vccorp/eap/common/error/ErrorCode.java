@@ -25,7 +25,11 @@ public enum ErrorCode {
     DEPARTMENT_NOT_FOUND(HttpStatus.NOT_FOUND, "Phòng ban không tồn tại."),
 
     // Embedding
-    EMBEDDING_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "Lỗi tạo vector nhúng.");
+    EMBEDDING_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "Lỗi tạo vector nhúng."),
+
+    // HTTP / Routing
+    ERR_RESOURCE_NOT_FOUND(HttpStatus.NOT_FOUND, "Tài nguyên hoặc endpoint yêu cầu không tồn tại."),
+    ERR_METHOD_NOT_ALLOWED(HttpStatus.METHOD_NOT_ALLOWED, "Phương thức HTTP không được hỗ trợ cho endpoint này.");
 
     private final HttpStatus httpStatus;
     private final String defaultMessage;

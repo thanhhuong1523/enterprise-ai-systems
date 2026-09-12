@@ -1,12 +1,60 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { apiClient } from '@/api/client';
-import { MessageSquare, X, Send, Bot, FileText, Sparkles } from 'lucide-react';
+import { getAccessToken, getApiBaseUrl } from '@/api/client';
+import { MessageSquare, X, Send, Bot, FileText, Sparkles, Loader2, CheckCircle2, AlertCircle, ChevronDown, ChevronRight } from 'lucide-react';
+
+interface ReasoningStep {
+  step: number;
+  thought: string;
+}
+
+interface ActionStep {
+  step: number;
+  tool?: string;
+  label: string;
+  status: 'CALLING_TOOL' | 'SUCCESS' | 'ERROR';
+}
 
 interface Message {
   sender: 'user' | 'assistant';
   text: string;
-  chunks?: Array<{ content: string; score: number }>;
+  chunks?: Array<any>;
+  steps?: ActionStep[];
+  reasoningSteps?: ReasoningStep[];
+  isThinking?: boolean;
+  statusMessage?: string;
 }
+
+const ReasoningPanel: React.FC<{ steps?: ReasoningStep[] }> = ({ steps }) => {
+  const [expanded, setExpanded] = useState(false);
+
+  if (!steps || steps.length === 0) return null;
+
+  return (
+    <div className="mb-2.5 rounded-xl border border-indigo-200/60 dark:border-indigo-800/40 bg-indigo-50/50 dark:bg-indigo-950/20 overflow-hidden text-xs">
+      <button
+        type="button"
+        onClick={() => setExpanded(!expanded)}
+        className="w-full px-2.5 py-1.5 flex items-center justify-between text-indigo-700 dark:text-indigo-300 font-medium hover:bg-indigo-100/50 dark:hover:bg-indigo-900/30 transition-colors text-left cursor-pointer border-0 bg-transparent"
+      >
+        <span className="flex items-center gap-1.5">
+          <span>🧠</span>
+          <span>Quá trình suy luận ({steps.length} bước)</span>
+        </span>
+        {expanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+      </button>
+      {expanded && (
+        <div className="px-2.5 pb-2 pt-1 space-y-1.5 border-t border-indigo-200/40 dark:border-indigo-800/30 text-[11px] text-slate-600 dark:text-zinc-400">
+          {steps.map((s, idx) => (
+            <div key={idx} className="leading-relaxed bg-white/70 dark:bg-zinc-900/60 p-2 rounded-lg border border-indigo-100 dark:border-indigo-900/40">
+              <div className="font-semibold text-indigo-600 dark:text-indigo-400 mb-0.5">Bước {s.step}:</div>
+              <div className="italic whitespace-pre-wrap">{s.thought}</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
 
 export const ChatWidget: React.FC = () => {
   const [isOpen, setIsOpen] = useState(false);
@@ -14,7 +62,7 @@ export const ChatWidget: React.FC = () => {
   const [messages, setMessages] = useState<Message[]>([
     { 
       sender: 'assistant', 
-      text: 'Xin chào! Tôi là Trợ lý EAP AI. Tôi có thể hỗ trợ bạn tìm kiếm tài liệu, phòng ban, hoặc thông tin nhân sự trên hệ thống. Bạn cần tìm thông tin gì hôm nay?' 
+      text: 'Xin chào! Tôi là Trợ lý EAP AI. Tôi có thể hỗ trợ bạn tìm kiếm tài liệu, phòng ban, hoặc quản lý hệ thống. Bạn cần hỗ trợ gì hôm nay?' 
     }
   ]);
   const [loading, setLoading] = useState(false);
@@ -22,41 +70,194 @@ export const ChatWidget: React.FC = () => {
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, isOpen]);
+  }, [messages, isOpen, loading]);
 
   const handleSend = async () => {
     if (!input.trim() || loading) return;
     const userMessage = input.trim();
     setInput('');
-    setMessages(prev => [...prev, { sender: 'user', text: userMessage }]);
+
+    // Append user message and placeholder assistant message
+    setMessages(prev => [
+      ...prev,
+      { sender: 'user', text: userMessage },
+      { 
+        sender: 'assistant', 
+        text: '', 
+        isThinking: true, 
+        statusMessage: 'Đang tiếp nhận yêu cầu...',
+        steps: [] 
+      }
+    ]);
     setLoading(true);
 
     try {
-      const response = await apiClient.post('/api/v1/search', { message: userMessage });
-      const apiResponse = response.data;
-      
-      if (apiResponse && apiResponse.success && apiResponse.data) {
-        const chatData = apiResponse.data;
-        setMessages(prev => [...prev, {
-          sender: 'assistant',
-          text: chatData.response === 'không có' 
-            ? 'Tôi chưa tìm thấy tài liệu nào phù hợp với yêu cầu của bạn.' 
-            : chatData.response,
-          chunks: chatData.chunks || []
-        }]);
-      } else {
-        setMessages(prev => [...prev, {
-          sender: 'assistant',
-          text: 'Rất tiếc, tôi chưa tìm thấy tài liệu phù hợp lúc này.'
-        }]);
+      const token = getAccessToken();
+      const baseUrl = getApiBaseUrl();
+      const url = `${baseUrl}/api/v1/ai/assistant/chat/stream`;
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+        },
+        credentials: 'include',
+        body: JSON.stringify({ message: userMessage })
+      });
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          throw new Error('Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.');
+        } else if (response.status === 403) {
+          throw new Error('Bạn không có quyền thực hiện yêu cầu này.');
+        } else {
+          throw new Error('Không thể kết nối tới Trợ lý AI. Vui lòng thử lại sau.');
+        }
       }
-    } catch {
-      setMessages(prev => [...prev, {
-        sender: 'assistant',
-        text: 'Hệ thống đang gặp sự cố kết nối, xin vui lòng thử lại sau.'
-      }]);
+
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error('Không thể thiết lập luồng dữ liệu thời gian thực.');
+      }
+
+      const decoder = new TextDecoder('utf-8');
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const blocks = buffer.split('\n\n');
+        buffer = blocks.pop() || '';
+
+        for (const block of blocks) {
+          if (!block.trim()) continue;
+
+          let eventName = 'message';
+          let dataStr = '';
+
+          for (const rawLine of block.split('\n')) {
+            const line = rawLine.trim();
+            if (line.startsWith('event:')) {
+              eventName = line.substring(6).trim();
+            } else if (line.startsWith('data:')) {
+              dataStr = line.substring(5).trim();
+            }
+          }
+
+          if (!dataStr) continue;
+
+          try {
+            const eventData = JSON.parse(dataStr);
+
+            setMessages(prev => {
+              const updated = [...prev];
+              const lastMsg = { ...updated[updated.length - 1] };
+              if (lastMsg.sender !== 'assistant') return prev;
+
+              if (eventName === 'thinking') {
+                lastMsg.statusMessage = eventData.message || 'Đang phân tích yêu cầu...';
+                lastMsg.isThinking = true;
+              } else if (eventName === 'reasoning') {
+                const currentReasoning = [...(lastMsg.reasoningSteps || [])];
+                const thoughtText = eventData.thought || eventData.text || '';
+                if (thoughtText) {
+                  currentReasoning.push({
+                    step: eventData.step ?? (currentReasoning.length + 1),
+                    thought: thoughtText
+                  });
+                  lastMsg.reasoningSteps = currentReasoning;
+                }
+                lastMsg.statusMessage = '🧠 Đang suy luận bước ' + (eventData.step ?? currentReasoning.length) + '...';
+                lastMsg.isThinking = true;
+              } else if (eventName === 'action_start') {
+                lastMsg.statusMessage = eventData.label || 'Đang thực hiện công cụ...';
+                const currentSteps = [...(lastMsg.steps || [])];
+                currentSteps.push({
+                  step: eventData.step ?? currentSteps.length + 1,
+                  tool: eventData.tool,
+                  label: eventData.label,
+                  status: 'CALLING_TOOL'
+                });
+                lastMsg.steps = currentSteps;
+              } else if (eventName === 'action_end') {
+                const currentSteps = [...(lastMsg.steps || [])];
+                const stepIdx = currentSteps.findLastIndex?.(s => s.tool === eventData.tool) ?? 
+                                currentSteps.findIndex(s => s.tool === eventData.tool);
+                if (stepIdx !== -1) {
+                  currentSteps[stepIdx] = {
+                    ...currentSteps[stepIdx],
+                    label: eventData.label || currentSteps[stepIdx].label,
+                    status: eventData.status === 'SUCCESS' ? 'SUCCESS' : 'ERROR'
+                  };
+                } else {
+                  currentSteps.push({
+                    step: eventData.step ?? currentSteps.length + 1,
+                    tool: eventData.tool,
+                    label: eventData.label,
+                    status: 'SUCCESS'
+                  });
+                }
+                lastMsg.steps = currentSteps;
+                lastMsg.statusMessage = eventData.label;
+              } else if (eventName === 'content') {
+                lastMsg.text = eventData.text || '';
+                if (eventData.chunks && Array.isArray(eventData.chunks)) {
+                  lastMsg.chunks = eventData.chunks;
+                }
+                lastMsg.isThinking = false;
+                lastMsg.statusMessage = undefined;
+              } else if (eventName === 'error') {
+                lastMsg.text = eventData.message ? `⚠️ ${eventData.message}` : '⚠️ Có lỗi xảy ra trong quá trình xử lý.';
+                lastMsg.isThinking = false;
+                lastMsg.statusMessage = undefined;
+              } else if (eventName === 'done') {
+                lastMsg.isThinking = false;
+                lastMsg.statusMessage = undefined;
+              }
+
+              updated[updated.length - 1] = lastMsg;
+              return updated;
+            });
+          } catch (err) {
+            console.error('Lỗi khi đọc sự kiện SSE:', err, dataStr);
+          }
+        }
+      }
+    } catch (error: any) {
+      setMessages(prev => {
+        const updated = [...prev];
+        const lastMsg = { ...updated[updated.length - 1] };
+        if (lastMsg && lastMsg.sender === 'assistant') {
+          lastMsg.text = error?.message || 'Hệ thống đang gặp sự cố kết nối, xin vui lòng thử lại sau.';
+          lastMsg.isThinking = false;
+          lastMsg.statusMessage = undefined;
+          updated[updated.length - 1] = lastMsg;
+          return updated;
+        }
+        return [...prev, {
+          sender: 'assistant',
+          text: error?.message || 'Hệ thống đang gặp sự cố kết nối, xin vui lòng thử lại sau.'
+        }];
+      });
     } finally {
       setLoading(false);
+      setMessages(prev => {
+        const updated = [...prev];
+        const lastMsg = { ...updated[updated.length - 1] };
+        if (lastMsg && lastMsg.sender === 'assistant') {
+          lastMsg.isThinking = false;
+          lastMsg.statusMessage = undefined;
+          // Nếu không có cả text lẫn steps mà luồng đã kết thúc
+          if (!lastMsg.text && (!lastMsg.steps || lastMsg.steps.length === 0)) {
+            lastMsg.text = 'Đã hoàn tất xử lý yêu cầu.';
+          }
+          updated[updated.length - 1] = lastMsg;
+        }
+        return updated;
+      });
     }
   };
 
@@ -101,7 +302,7 @@ export const ChatWidget: React.FC = () => {
 
       {/* 2. Professional Styled Chat Window */}
       {isOpen && (
-        <div className="absolute bottom-18 right-0 w-96 h-[530px] bg-card text-foreground rounded-2xl shadow-2xl border border-border/80 flex flex-col overflow-hidden animate-chat-pop">
+        <div className="absolute bottom-18 right-0 w-[420px] h-[560px] bg-card text-foreground rounded-2xl shadow-2xl border border-border/80 flex flex-col overflow-hidden animate-chat-pop">
           {/* Header */}
           <div className="bg-slate-900 dark:bg-zinc-950 text-white p-4 flex items-center justify-between relative select-none border-b border-white/5">
             <div className="flex items-center space-x-3">
@@ -113,7 +314,7 @@ export const ChatWidget: React.FC = () => {
                 <h3 className="font-semibold text-sm leading-none">Trợ lý EAP AI</h3>
                 <span className="flex items-center text-[10px] text-emerald-400 font-medium mt-1">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 mr-1 animate-pulse-dot"></span>
-                  Đang trực tuyến
+                  Tự chủ xâu chuỗi tác vụ
                 </span>
               </div>
             </div>
@@ -134,12 +335,44 @@ export const ChatWidget: React.FC = () => {
                     <Sparkles className="w-4 h-4" />
                   </div>
                 )}
-                <div className={`max-w-[80%] p-3 rounded-2xl shadow-sm ${
+                <div className={`max-w-[85%] p-3.5 rounded-2xl shadow-sm ${
                   msg.sender === 'user' 
                     ? 'bg-primary text-primary-foreground rounded-tr-none' 
                     : 'bg-card text-foreground border border-border/80 rounded-tl-none'
                 }`}>
-                  <p className="text-sm whitespace-pre-line leading-relaxed">{msg.text}</p>
+                  {/* Reasoning Process (Collapsible Panel) */}
+                  <ReasoningPanel steps={msg.reasoningSteps} />
+
+                  {/* Action Steps Executed (Action Stepper) */}
+                  {msg.steps && msg.steps.length > 0 && (
+                    <div className="mb-2.5 space-y-1.5 pb-2 border-b border-border/60">
+                      {msg.steps.map((step, sIdx) => (
+                        <div key={sIdx} className="flex items-center gap-2 text-xs font-medium text-muted-foreground bg-secondary/40 dark:bg-secondary/20 px-2.5 py-1.5 rounded-lg border border-border/40">
+                          {step.status === 'CALLING_TOOL' ? (
+                            <Loader2 className="w-3.5 h-3.5 text-indigo-500 animate-spin shrink-0" />
+                          ) : step.status === 'SUCCESS' ? (
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                          ) : (
+                            <AlertCircle className="w-3.5 h-3.5 text-rose-500 shrink-0" />
+                          )}
+                          <span className="truncate">{step.label}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Message Content */}
+                  {msg.text && (
+                    <p className="text-sm whitespace-pre-line leading-relaxed">{msg.text}</p>
+                  )}
+
+                  {/* Thinking Status Indicator */}
+                  {msg.isThinking && msg.statusMessage && (
+                    <div className="flex items-center gap-2 text-xs text-indigo-600 dark:text-indigo-400 font-medium py-1">
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>{msg.statusMessage}</span>
+                    </div>
+                  )}
                   
                   {/* Documents Found (Chunks) */}
                   {msg.chunks && msg.chunks.length > 0 && (
@@ -186,11 +419,13 @@ export const ChatWidget: React.FC = () => {
                             <p className="font-medium italic leading-relaxed pl-1 text-foreground/90">"{chunk.content}"</p>
                             
                             {/* Similarity Score */}
-                            <div className="mt-1 text-right">
-                              <span className="inline-flex items-center px-1.5 py-0.5 rounded-full bg-primary/10 text-primary text-[9px] font-semibold">
-                                Độ khớp: {Math.max(0, Math.min(100, Math.round(chunk.score * 100)))}%
-                              </span>
-                            </div>
+                            {chunk.score != null && (
+                              <div className="mt-1 text-right">
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded-full bg-primary/10 text-primary text-[9px] font-semibold">
+                                  Độ khớp: {Math.max(0, Math.min(100, Math.round(chunk.score * 100)))}%
+                                </span>
+                              </div>
+                            )}
                           </div>
                         );
                       })}
@@ -199,18 +434,7 @@ export const ChatWidget: React.FC = () => {
                 </div>
               </div>
             ))}
-            {loading && (
-              <div className="flex justify-start items-start gap-2.5">
-                <div className="w-7 h-7 rounded-lg bg-gradient-to-tr from-indigo-500 to-purple-600 flex items-center justify-center text-white flex-shrink-0 shadow-sm mt-0.5 animate-pulse">
-                  <Sparkles className="w-4 h-4" />
-                </div>
-                <div className="bg-card text-muted-foreground p-3.5 rounded-2xl shadow-sm border border-border/80 rounded-tl-none flex items-center space-x-1.5">
-                  <div className="w-1.5 h-1.5 bg-primary/80 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
-                  <div className="w-1.5 h-1.5 bg-primary/80 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
-                  <div className="w-1.5 h-1.5 bg-primary/80 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
-                </div>
-              </div>
-            )}
+
             <div ref={chatEndRef} />
           </div>
 
@@ -220,7 +444,7 @@ export const ChatWidget: React.FC = () => {
               type="text"
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="Nhập câu hỏi hoặc tài liệu cần tìm..."
+              placeholder="Nhập yêu cầu hoặc câu hỏi cho Trợ lý..."
               className="flex-1 px-3.5 py-2 border border-border focus:ring-1 focus:ring-primary focus:border-primary outline-none rounded-xl text-sm transition-all text-foreground bg-secondary/30 dark:bg-secondary/10 placeholder:text-muted-foreground/60"
             />
             <button

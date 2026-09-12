@@ -6,6 +6,7 @@ import com.vccorp.eap.dto.user.CreateUserRequest;
 import com.vccorp.eap.dto.user.UpdateUserRequest;
 import com.vccorp.eap.dto.user.UserResponse;
 import com.vccorp.eap.enums.Role;
+import com.vccorp.eap.infrastructure.security.SecurityContextHelper;
 import com.vccorp.eap.model.User;
 import com.vccorp.eap.repository.UserRepository;
 import com.vccorp.eap.service.cache.RedisService;
@@ -54,6 +55,11 @@ public class UserServiceImpl implements UserService {
     @Override
     @Transactional
     public UserResponse createUser(CreateUserRequest request) {
+        User currentUser = SecurityContextHelper.getCurrentUser();
+        if (currentUser.getRole() != Role.SYSTEM_ADMIN) {
+            throw new BusinessException(ErrorCode.ERR_FORBIDDEN_ROLE);
+        }
+
         userRequestValidator.validateCreateRequest(request);
 
         String usernameClean = request.username().trim();
@@ -78,6 +84,11 @@ public class UserServiceImpl implements UserService {
     @Override
     @Transactional(readOnly = true)
     public List<UserResponse> listUsers() {
+        User currentUser = SecurityContextHelper.getCurrentUser();
+        if (currentUser.getRole() != Role.SYSTEM_ADMIN) {
+            throw new BusinessException(ErrorCode.ERR_FORBIDDEN_ROLE);
+        }
+
         return userRepository.findAll().stream()
                 .map(userMapper::mapToResponse)
                 .collect(Collectors.toList());
@@ -86,12 +97,22 @@ public class UserServiceImpl implements UserService {
     @Override
     @Transactional(readOnly = true)
     public UserResponse getUserDetail(UUID id) {
+        User currentUser = SecurityContextHelper.getCurrentUser();
+        if (currentUser.getRole() != Role.SYSTEM_ADMIN) {
+            throw new BusinessException(ErrorCode.ERR_FORBIDDEN_ROLE);
+        }
+
         return userMapper.mapToResponse(findUserById(id));
     }
 
     @Override
     @Transactional
     public UserResponse updateUser(UUID id, UpdateUserRequest request) {
+        User currentUser = SecurityContextHelper.getCurrentUser();
+        if (currentUser.getRole() != Role.SYSTEM_ADMIN) {
+            throw new BusinessException(ErrorCode.ERR_FORBIDDEN_ROLE);
+        }
+
         User user = findUserById(id);
         userRequestValidator.validateUpdateRequest(user, request);
 
@@ -114,6 +135,11 @@ public class UserServiceImpl implements UserService {
     @Override
     @Transactional
     public void deleteUser(UUID id) {
+        User currentUser = SecurityContextHelper.getCurrentUser();
+        if (currentUser.getRole() != Role.SYSTEM_ADMIN) {
+            throw new BusinessException(ErrorCode.ERR_FORBIDDEN_ROLE);
+        }
+
         User user = findUserById(id);
         if (user.getRole() == Role.SYSTEM_ADMIN) {
             throw new BusinessException(ErrorCode.VALIDATION_ERROR, "Không thể xóa tài khoản quản trị hệ thống (SYSTEM_ADMIN).");

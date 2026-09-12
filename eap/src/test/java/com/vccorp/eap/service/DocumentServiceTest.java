@@ -402,6 +402,30 @@ public class DocumentServiceTest {
     }
 
     @Test
+    void deleteOriginalDocument_ByBoardMember_Success() {
+        UUID origId = new UUID(12345L, 2L);
+        Document original = Document.builder()
+                .id(origId)
+                .ownerDepartmentId(boardDeptId)
+                .build();
+
+        User boardUser = User.builder()
+                .id(UUID.randomUUID())
+                .username("board_member")
+                .role(Role.ROLE_BOARD)
+                .departmentId(boardDeptId)
+                .build();
+
+        when(documentRepository.findByIdForUpdate(origId)).thenReturn(Optional.of(original));
+        when(departmentRepository.findById(boardDeptId)).thenReturn(Optional.of(new Department(boardDeptId, "BOARD", "Board of Directors")));
+
+        documentService.deleteOriginalDocument(origId, boardUser);
+
+        assertNotNull(original.getDeletedAt());
+        verify(documentRepository, times(1)).softDeleteAliasesByOriginalId(eq(origId), any(LocalDateTime.class));
+    }
+
+    @Test
     void uploadOriginalDocument_ReusePhysicalFile_Success() throws Exception {
         MockMultipartFile file = new MockMultipartFile(
                 "file", "test.pdf", "application/pdf", "%PDF-1.4 mock content".getBytes()

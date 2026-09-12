@@ -9,6 +9,9 @@ export const setAccessToken = (token: string | null) => {
   accessToken = token;
 };
 
+export const getAccessToken = () => accessToken;
+export const getApiBaseUrl = () => API_BASE_URL;
+
 export const setHasSession = (val: boolean) => {
   hasSession = val;
 };

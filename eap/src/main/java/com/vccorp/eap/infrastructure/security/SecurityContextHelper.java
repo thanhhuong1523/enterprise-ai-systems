@@ -22,4 +22,12 @@ public final class SecurityContextHelper {
         }
         throw new BusinessException(ErrorCode.ERR_UNAUTHENTICATED);
     }
+
+    public static User getCurrentUserOrNull() {
+        try {
+            return getCurrentUser();
+        } catch (Exception e) {
+            return null;
+        }
+    }
 }

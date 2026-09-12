@@ -12,6 +12,9 @@ import com.vccorp.eap.repository.DocumentRepository;
 import com.vccorp.eap.repository.UserRepository;
 import com.vccorp.eap.service.department.DepartmentService;
 import com.vccorp.eap.service.mapper.DepartmentMapper;
+import com.vccorp.eap.enums.Role;
+import com.vccorp.eap.infrastructure.security.SecurityContextHelper;
+import com.vccorp.eap.model.User;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -46,6 +49,11 @@ public class DepartmentServiceImpl implements DepartmentService {
     @Override
     @Transactional
     public DepartmentResponse createDepartment(CreateDepartmentRequest request) {
+        User currentUser = SecurityContextHelper.getCurrentUser();
+        if (currentUser.getRole() != Role.SYSTEM_ADMIN) {
+            throw new BusinessException(ErrorCode.ERR_FORBIDDEN_ROLE);
+        }
+
         if (request.code() == null || request.code().trim().isEmpty() ||
             request.name() == null || request.name().trim().isEmpty()) {
             throw new BusinessException(ErrorCode.VALIDATION_ERROR, "Mã hoặc tên phòng ban không được để trống.");
@@ -91,6 +99,7 @@ public class DepartmentServiceImpl implements DepartmentService {
     @Override
     @Transactional(readOnly = true)
     public List<DepartmentResponse> listDepartments() {
+        SecurityContextHelper.getCurrentUser();
         return departmentRepository.findAll().stream()
                 .map(departmentMapper::mapToResponse)
                 .collect(Collectors.toList());
@@ -99,12 +108,18 @@ public class DepartmentServiceImpl implements DepartmentService {
     @Override
     @Transactional(readOnly = true)
     public DepartmentResponse getDepartmentDetail(UUID id) {
+        SecurityContextHelper.getCurrentUser();
         return departmentMapper.mapToResponse(findDepartmentById(id));
     }
 
     @Override
     @Transactional
     public DepartmentResponse updateDepartment(UUID id, UpdateDepartmentRequest request) {
+        User currentUser = SecurityContextHelper.getCurrentUser();
+        if (currentUser.getRole() != Role.SYSTEM_ADMIN) {
+            throw new BusinessException(ErrorCode.ERR_FORBIDDEN_ROLE);
+        }
+
         Department dept = findDepartmentById(id);
 
         if (request.name() != null && !request.name().trim().isEmpty()) {
@@ -144,6 +159,11 @@ public class DepartmentServiceImpl implements DepartmentService {
     @Override
     @Transactional
     public void deleteDepartment(UUID id) {
+        User currentUser = SecurityContextHelper.getCurrentUser();
+        if (currentUser.getRole() != Role.SYSTEM_ADMIN) {
+            throw new BusinessException(ErrorCode.ERR_FORBIDDEN_ROLE);
+        }
+
         Department dept = findDepartmentById(id);
         
         if (userRepository.existsByDepartmentId(id)) {
@@ -155,5 +175,18 @@ public class DepartmentServiceImpl implements DepartmentService {
 
         dept.setDeletedAt(LocalDateTime.now());
         departmentRepository.save(dept);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public java.util.Optional<DepartmentResponse> getDepartmentByName(String name) {
+        SecurityContextHelper.getCurrentUser();
+        if (name == null || name.trim().isEmpty()) {
+            return java.util.Optional.empty();
+        }
+        String cleanName = name.trim();
+        return departmentRepository.findByNameIgnoreCase(cleanName)
+                .or(() -> departmentRepository.findByCodeIgnoreCase(cleanName))
+                .map(departmentMapper::mapToResponse);
     }
 }

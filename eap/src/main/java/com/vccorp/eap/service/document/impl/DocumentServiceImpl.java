@@ -230,7 +230,9 @@ public class DocumentServiceImpl implements DocumentService {
             throw new BusinessException(ErrorCode.ERR_OWNERSHIP_VIOLATION);
         }
 
-        if (currentUser.getRole() != Role.ROLE_DEPT_MANAGER) {
+        boolean isManager = currentUser.getRole() == Role.ROLE_DEPT_MANAGER;
+        boolean isBoard = currentUser.getRole() == Role.ROLE_BOARD && uploadValidator.isBoardDepartment(currentUser.getDepartmentId());
+        if (!isManager && !isBoard) {
             throw new BusinessException(ErrorCode.ERR_FORBIDDEN_ROLE);
         }
 
@@ -255,7 +257,9 @@ public class DocumentServiceImpl implements DocumentService {
             throw new BusinessException(ErrorCode.ERR_DOCUMENT_NOT_FOUND);
         }
 
-        if (currentUser.getRole() != Role.ROLE_DEPT_MANAGER) {
+        boolean isDeleteManager = currentUser.getRole() == Role.ROLE_DEPT_MANAGER;
+        boolean isDeleteBoard = currentUser.getRole() == Role.ROLE_BOARD && uploadValidator.isBoardDepartment(currentUser.getDepartmentId());
+        if (!isDeleteManager && !isDeleteBoard) {
             throw new BusinessException(ErrorCode.ERR_FORBIDDEN_ROLE);
         }
 

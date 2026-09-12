@@ -2,9 +2,6 @@ server:
   port: 8080
 
 spring:
-  autoconfigure:
-    exclude:
-      - org.springframework.ai.autoconfigure.vectorstore.pgvector.PgVectorStoreAutoConfiguration
   application:
     name: backend
   datasource:
@@ -54,6 +51,16 @@ spring:
       max-request-size: 50MB
       enabled: true
   ai:
+    mcp:
+      server:
+        name: vcc-eap-mcp-server
+        version: 1.0.0
+        type: sync
+        sse-endpoint: /api/v1/mcp/sse
+        sse-message-endpoint: /api/v1/mcp/message
+        webmvc:
+          sse-endpoint: /api/v1/mcp/sse
+          message-endpoint: /api/v1/mcp/message
     embedding:
       transformer:
         onnx:

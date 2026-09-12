@@ -7,9 +7,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 import java.sql.SQLTransientConnectionException;
 import java.util.Map;
 
@@ -95,6 +97,24 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiResponse<Void>> handleConnectionPoolExhausted(SQLTransientConnectionException ex) {
         ErrorCode errorCode = ErrorCode.ERR_CONCURRENT_UPLOAD;
         ApiResponse<Void> response = ApiResponse.error(errorCode.name(), errorCode.getDefaultMessage());
+        return new ResponseEntity<>(response, errorCode.getHttpStatus());
+    }
+
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<ApiResponse<Void>> handleNoResourceFoundException(NoResourceFoundException ex) {
+        log.warn("Tài nguyên không tồn tại (404): {} /{}", ex.getHttpMethod(), ex.getResourcePath());
+        ErrorCode errorCode = ErrorCode.ERR_RESOURCE_NOT_FOUND;
+        ApiResponse<Void> response = ApiResponse.error(errorCode.name(), "Không tìm thấy endpoint hoặc tài nguyên: /" + ex.getResourcePath());
+        return new ResponseEntity<>(response, errorCode.getHttpStatus());
+    }
+
+    @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
+    public ResponseEntity<ApiResponse<Void>> handleMethodNotSupportedException(HttpRequestMethodNotSupportedException ex) {
+        log.warn("Phương thức HTTP không được hỗ trợ (405): {} cho endpoint hiện tại. Hỗ trợ: {}", ex.getMethod(), ex.getSupportedHttpMethods());
+        ErrorCode errorCode = ErrorCode.ERR_METHOD_NOT_ALLOWED;
+        String msg = String.format("Phương thức %s không được hỗ trợ cho endpoint này. Các phương thức hỗ trợ: %s",
+                ex.getMethod(), ex.getSupportedHttpMethods() != null ? ex.getSupportedHttpMethods() : "[]");
+        ApiResponse<Void> response = ApiResponse.error(errorCode.name(), msg);
         return new ResponseEntity<>(response, errorCode.getHttpStatus());
     }
 

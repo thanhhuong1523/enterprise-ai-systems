@@ -30,9 +30,6 @@ import com.vccorp.eap.repository.DepartmentRepository;
 import com.vccorp.eap.service.document.LlmMetadataExtractorService;
 import com.vccorp.eap.service.embedding.EmbeddingService;
 import com.vccorp.eap.service.helper.LlmClient;
-import com.vccorp.eap.service.mcp.JsonSelfCorrectionService;
-import com.vccorp.eap.service.mcp.McpSchemaEngine;
-import com.vccorp.eap.service.mcp.McpToolExecutor;
 import com.vccorp.eap.service.search.RagAnswerGeneratorService;
 import com.vccorp.eap.service.search.RetrievalService;
 import com.vccorp.eap.service.search.VectorSearchService;
@@ -49,9 +46,6 @@ public class RetrievalServiceImpl implements RetrievalService {
     private final DepartmentRepository departmentRepository;
     private final ChunkRepository chunkRepository;
     private final RagAnswerGeneratorService ragAnswerGeneratorService;
-    private final McpSchemaEngine mcpSchemaEngine;
-    private final McpToolExecutor mcpToolExecutor;
-    private final JsonSelfCorrectionService jsonSelfCorrectionService;
     private final LlmClient llmClient;
     private final ObjectMapper objectMapper;
 
@@ -66,9 +60,6 @@ public class RetrievalServiceImpl implements RetrievalService {
             DepartmentRepository departmentRepository,
             ChunkRepository chunkRepository,
             RagAnswerGeneratorService ragAnswerGeneratorService,
-            McpSchemaEngine mcpSchemaEngine,
-            McpToolExecutor mcpToolExecutor,
-            JsonSelfCorrectionService jsonSelfCorrectionService,
             LlmClient llmClient,
             ObjectMapper objectMapper) {
         this.llmMetadataExtractorService = llmMetadataExtractorService;
@@ -78,9 +69,6 @@ public class RetrievalServiceImpl implements RetrievalService {
         this.departmentRepository = departmentRepository;
         this.chunkRepository = chunkRepository;
         this.ragAnswerGeneratorService = ragAnswerGeneratorService;
-        this.mcpSchemaEngine = mcpSchemaEngine;
-        this.mcpToolExecutor = mcpToolExecutor;
-        this.jsonSelfCorrectionService = jsonSelfCorrectionService;
         this.llmClient = llmClient;
         this.objectMapper = objectMapper;
     }
@@ -93,13 +81,10 @@ public class RetrievalServiceImpl implements RetrievalService {
 
         String message = request.message().trim();
 
-        // Check if user is requesting a tool call (Agent Route)
-        RagChatResponse toolCallResponse = tryExecuteAgentToolCall(message, currentUser);
-        if (toolCallResponse != null) {
-            return toolCallResponse;
+        // 1. Phân quyền: Kiểm tra an toàn currentUser và block SYSTEM_ADMIN
+        if (currentUser == null) {
+            throw new BusinessException(ErrorCode.ERR_UNAUTHENTICATED);
         }
-
-        // 1. Phân quyền: Block SYSTEM_ADMIN
         if (currentUser.getRole() == Role.SYSTEM_ADMIN) {
             throw new BusinessException(ErrorCode.ERR_FORBIDDEN_ROLE,
                     "Quản trị viên hệ thống không được phép tìm kiếm tài liệu.");
@@ -176,79 +161,5 @@ public class RetrievalServiceImpl implements RetrievalService {
         log.info("Tìm thấy {} kết quả cho user {}: {}. Đang gọi LLM tổng hợp câu trả lời...", chunks.size(), currentUser.getUsername(), message);
         String generatedResponse = ragAnswerGeneratorService.generateAnswer(message, chunks);
         return new RagChatResponse(generatedResponse, chunks);
-    }
-
-    private RagChatResponse tryExecuteAgentToolCall(String message, User currentUser) {
-        try {
-            // 1. Get available tools filtered by user's role
-            List<Map<String, Object>> tools = mcpSchemaEngine.getAvailableToolsForUser(currentUser);
-            if (tools == null || tools.isEmpty()) {
-                return null;
-            }
-
-            // 2. Build system prompt for Agent Tool Router
-            String toolsJson = objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(tools);
-            String systemPrompt = "Bạn là trợ lý ảo AI điều phối công cụ (Agent Tool Router) của doanh nghiệp.\n" +
-                    "Nhiệm vụ: Phân tích câu lệnh của người dùng và quyết định xem câu lệnh đó có yêu cầu gọi một công cụ (tool) nào dưới đây hay không.\n\n" +
-                    "## DANH SÁCH CÔNG CỤ HIỆN CÓ:\n" +
-                    toolsJson + "\n\n" +
-                    "## QUY TẮC ĐẦU RA:\n" +
-                    "- Trả về DUY NHẤT một đối tượng JSON có cấu trúc như sau:\n" +
-                    "  Nếu cần gọi công cụ:\n" +
-                    "  {\n" +
-                    "    \"is_tool_call\": true,\n" +
-                    "    \"tool_name\": \"tên_công_cụ\",\n" +
-                    "    \"arguments\": { ... các tham số trích xuất tương ứng ... }\n" +
-                    "  }\n" +
-                    "  Nếu KHÔNG cần gọi công cụ (chỉ là câu hỏi bình thường, chào hỏi, hoặc tìm kiếm tài liệu):\n" +
-                    "  {\n" +
-                    "    \"is_tool_call\": false\n" +
-                    "  }\n\n" +
-                    "- Tuyệt đối không giải thích, không markdown, không bọc trong thẻ ```json.";
-
-            // 3. Inject system timestamp context for relative time extraction
-            String userContent = "Thời gian hệ thống hiện tại: " + java.time.LocalDateTime.now() + "\n" +
-                    "Câu lệnh của người dùng: " + message;
-
-            // 4. Call LLM to decide
-            String llmResponse = llmClient.callLlmText(userContent, systemPrompt, 10000);
-            if (llmResponse == null || llmResponse.trim().isEmpty()) {
-                return null;
-            }
-
-            // 5. Correct and parse JSON using JsonSelfCorrectionService
-            Map<String, Object> responseMap = jsonSelfCorrectionService.validateAndCorrect(llmResponse);
-            
-            Boolean isToolCall = (Boolean) responseMap.get("is_tool_call");
-            if (isToolCall != null && isToolCall) {
-                String toolName = (String) responseMap.get("tool_name");
-                Map<String, Object> arguments = (Map<String, Object>) responseMap.get("arguments");
-                if (arguments == null) {
-                    arguments = new HashMap<>();
-                }
-
-                log.info("Agent Tool Router nhận định người dùng {} muốn gọi công cụ: {} với tham số: {}", 
-                        currentUser.getUsername(), toolName, arguments);
-
-                // 6. Execute the tool call
-                String rawResult = mcpToolExecutor.executeToolCall(toolName, arguments);
-                
-                // 7. Format natural language response using LLM
-                String summarizeSystemPrompt = "Bạn là trợ lý ảo AI thân thiện. Hãy dịch kết quả thực thi API (dạng JSON) của công cụ sau đây thành một câu trả lời tự nhiên, lịch sự và rõ ràng bằng tiếng Việt cho người dùng.";
-                String summarizeUserContent = String.format("Yêu cầu của người dùng: %s\nCông cụ đã gọi: %s\nKết quả API trả về:\n%s",
-                        message, toolName, rawResult);
-                
-                String naturalLanguageResponse = llmClient.callLlmText(summarizeUserContent, summarizeSystemPrompt, 8000);
-                if (naturalLanguageResponse == null || naturalLanguageResponse.trim().isEmpty()) {
-                    naturalLanguageResponse = "Đã thực thi công cụ " + toolName + " thành công. Kết quả: " + rawResult;
-                }
-
-                return new RagChatResponse(naturalLanguageResponse, Collections.emptyList());
-            }
-        } catch (Exception e) {
-            log.error("Lỗi khi xử lý Tool Call Agent: {}", e.getMessage(), e);
-            // In case of error (e.g. invalid json format), fallback to RAG instead of crashing
-        }
-        return null;
     }
 }
