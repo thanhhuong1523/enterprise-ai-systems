@@ -19,4 +19,5 @@ public interface DocumentService {
     DocumentResponse createAlias(CreateAliasRequest request, User currentUser);
     void deleteAlias(UUID id, User currentUser);
     byte[] resolveAlias(UUID id, User currentUser);
+    DocumentResponse getDocumentByTitle(String title, User currentUser);
 }

@@ -154,4 +154,47 @@ public class UserServiceImpl implements UserService {
             log.warn("Failed to evict Redis cache for user {}: {}", id, e.getMessage());
         }
     }
+
+    @Override
+    @Transactional(readOnly = true)
+    public UserResponse getUserByName(String name) {
+        if (name == null || name.trim().isEmpty()) {
+            throw new BusinessException(ErrorCode.USER_NOT_FOUND, "Tên người dùng không được để trống.");
+        }
+        User currentUser = SecurityContextHelper.getCurrentUser();
+        String cleanName = name.trim();
+        User user = userRepository.findByFullNameIgnoreCaseAndDeletedAtIsNull(cleanName)
+                .or(() -> userRepository.findByUsernameIgnoreCaseAndDeletedAtIsNull(cleanName))
+                .or(() -> {
+                    List<User> matches = userRepository.findByFullNameContainingIgnoreCaseOrUsernameContainingIgnoreCase(cleanName, cleanName);
+                    return matches.stream().filter(u -> u.getDeletedAt() == null).findFirst();
+                })
+                .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND,
+                        "Không tìm thấy người dùng '" + cleanName + "' trong hệ thống. Vui lòng kiểm tra lại họ tên hoặc tên đăng nhập."));
+
+        if (currentUser.getRole() != Role.SYSTEM_ADMIN) {
+            if (user.getDepartmentId() == null || !user.getDepartmentId().equals(currentUser.getDepartmentId())) {
+                throw new BusinessException(ErrorCode.ERR_FORBIDDEN_ROLE, "Bạn chỉ được phép tra cứu thông tin người dùng trong phòng ban của mình.");
+            }
+        }
+
+        return userMapper.mapToResponse(user);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<UserResponse> listUsersByDepartment(UUID departmentId, User currentUser) {
+        if (departmentId == null) {
+            throw new BusinessException(ErrorCode.ERR_INVALID_REQUEST, "Mã phòng ban không được để trống.");
+        }
+        User effectiveUser = currentUser != null ? currentUser : SecurityContextHelper.getCurrentUser();
+        if (effectiveUser.getRole() != Role.SYSTEM_ADMIN) {
+            if (effectiveUser.getDepartmentId() == null || !effectiveUser.getDepartmentId().equals(departmentId)) {
+                throw new BusinessException(ErrorCode.ERR_FORBIDDEN_ROLE, "Bạn chỉ được phép xem danh sách nhân sự trong phòng ban của mình.");
+            }
+        }
+        return userRepository.findByDepartmentIdAndDeletedAtIsNull(departmentId).stream()
+                .map(userMapper::mapToResponse)
+                .collect(Collectors.toList());
+    }
 }

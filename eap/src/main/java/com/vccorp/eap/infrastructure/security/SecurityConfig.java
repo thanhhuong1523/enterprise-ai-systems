@@ -31,14 +31,11 @@ import java.util.List;
 public class SecurityConfig {
 
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
-    private final McpSecurityFilter mcpSecurityFilter;
     private final ObjectMapper objectMapper;
 
     public SecurityConfig(JwtAuthenticationFilter jwtAuthenticationFilter,
-                          @Autowired(required = false) McpSecurityFilter mcpSecurityFilter,
                           ObjectMapper objectMapper) {
         this.jwtAuthenticationFilter = jwtAuthenticationFilter;
-        this.mcpSecurityFilter = mcpSecurityFilter;
         this.objectMapper = objectMapper;
     }
 
@@ -64,12 +61,15 @@ public class SecurityConfig {
                 "http://*.shares.zrok.io"
         ));
         configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));
-        configuration.setAllowedHeaders(Arrays.asList("Authorization", "Content-Type", "Accept", "Origin", "X-Requested-With"));
+        configuration.setAllowedHeaders(Arrays.asList("Authorization", "Content-Type", "Accept", "Origin", "X-Requested-With", "Mcp-Session-Id"));
+        configuration.setExposedHeaders(List.of("Mcp-Session-Id"));
         configuration.setAllowCredentials(true);
         configuration.setMaxAge(3600L);
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/api/**", configuration);
+        source.registerCorsConfiguration("/mcp/**", configuration);
+        source.registerCorsConfiguration("/mcp", configuration);
         return source;
     }
 
@@ -95,8 +95,8 @@ public class SecurityConfig {
                 .requestMatchers("/api/v1/auth/login", "/api/v1/auth/refresh", "/api/v1/auth/logout", "/api/v1/ping").permitAll()
                 .requestMatchers("/v3/api-docs", "/v3/api-docs/**", "/v3/api-docs.yaml", "/swagger-ui/**", "/swagger-ui.html").permitAll()
                 
-                // MCP endpoints are publicly mapped but secured programmatically by services
-                .requestMatchers("/api/v1/mcp", "/api/v1/mcp/**").permitAll()
+                // MCP endpoint requires authentication with Bearer token
+                .requestMatchers("/mcp", "/mcp/**").authenticated()
                 // Autonomous AI Assistant endpoint
                 .requestMatchers("/api/v1/ai/assistant/**").authenticated()
                 // Departments: GET is accessible by any authenticated user (needed for dropdowns in DocumentsPage),
@@ -116,10 +116,6 @@ public class SecurityConfig {
                 .anyRequest().authenticated()
             )
             .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
-
-        if (mcpSecurityFilter != null) {
-            http.addFilterAfter(mcpSecurityFilter, JwtAuthenticationFilter.class);
-        }
 
         return http.build();
     }

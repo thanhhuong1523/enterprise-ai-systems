@@ -49,18 +49,19 @@ spring:
     multipart:
       max-file-size: 50MB
       max-request-size: 50MB
+  threads:
+    virtual:
       enabled: true
+  mvc:
+    async:
+      request-timeout: 3600000
   ai:
     mcp:
       server:
         name: vcc-eap-mcp-server
         version: 1.0.0
         type: sync
-        sse-endpoint: /api/v1/mcp/sse
-        sse-message-endpoint: /api/v1/mcp/message
-        webmvc:
-          sse-endpoint: /api/v1/mcp/sse
-          message-endpoint: /api/v1/mcp/message
+        protocol: streamable
     embedding:
       transformer:
         onnx:
@@ -104,6 +105,9 @@ logging:
   level:
     root: INFO
     com.vccorp.eap: INFO
+    com.vccorp.eap.mcp: DEBUG
+    io.modelcontextprotocol: DEBUG
+    org.springframework.ai.mcp: DEBUG
     com.vccorp.eap.service.lock: DEBUG
     com.vccorp.eap.service.storage: DEBUG
     com.zaxxer.hikari: INFO

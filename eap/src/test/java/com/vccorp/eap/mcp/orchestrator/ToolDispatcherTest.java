@@ -124,10 +124,10 @@ class ToolDispatcherTest {
     @Test
     void testExecuteTool_CustomFacadeAutoDiscoveryAndExecution() {
         class SampleFacade implements com.vccorp.eap.mcp.tools.McpToolFacade {
-            @com.vccorp.eap.mcp.annotation.McpTool(name = "calculator")
+            @org.springaicommunity.mcp.annotation.McpTool(name = "calculator")
             public int calculate(
-                    @com.vccorp.eap.mcp.annotation.McpToolParam(description = "Số a") int a,
-                    @com.vccorp.eap.mcp.annotation.McpToolParam(description = "Số b") int b
+                    @org.springaicommunity.mcp.annotation.McpToolParam(description = "Số a") int a,
+                    @org.springaicommunity.mcp.annotation.McpToolParam(description = "Số b") int b
             ) {
                 return a + b;
             }

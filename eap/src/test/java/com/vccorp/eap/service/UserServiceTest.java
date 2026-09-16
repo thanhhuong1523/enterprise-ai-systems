@@ -35,6 +35,9 @@ public class UserServiceTest {
     @Mock
     private RedisService redisService;
 
+    @Mock
+    private com.vccorp.eap.service.mapper.UserMapper userMapper;
+
     @InjectMocks
     private UserServiceImpl userService;
 
@@ -125,5 +128,39 @@ public class UserServiceTest {
         UUID targetUserId = UUID.randomUUID();
         BusinessException ex = assertThrows(BusinessException.class, () -> userService.deleteUser(targetUserId));
         assertEquals(ErrorCode.ERR_UNAUTHENTICATED, ex.getErrorCode());
+    }
+
+    @Test
+    void getUserByName_NonAdmin_DifferentDepartment_ThrowsForbiddenRole() {
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(employeeCaller, null,
+                        Collections.singletonList(new SimpleGrantedAuthority(employeeCaller.getRole().name())))
+        );
+
+        User otherDeptUser = User.builder()
+                .id(UUID.randomUUID())
+                .username("other")
+                .fullName("Khác Phòng Ban")
+                .departmentId(UUID.randomUUID()) // khác employeeCaller.departmentId
+                .role(Role.ROLE_EMPLOYEE)
+                .build();
+
+        when(userRepository.findByFullNameIgnoreCaseAndDeletedAtIsNull("Khác Phòng Ban"))
+                .thenReturn(Optional.of(otherDeptUser));
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> userService.getUserByName("Khác Phòng Ban"));
+        assertEquals(ErrorCode.ERR_FORBIDDEN_ROLE, ex.getErrorCode());
+        assertEquals("Bạn chỉ được phép tra cứu thông tin người dùng trong phòng ban của mình.", ex.getMessage());
+    }
+
+    @Test
+    void listUsersByDepartment_NonAdmin_DifferentDepartment_ThrowsForbiddenRole() {
+        UUID otherDeptId = UUID.randomUUID();
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> userService.listUsersByDepartment(otherDeptId, employeeCaller));
+        assertEquals(ErrorCode.ERR_FORBIDDEN_ROLE, ex.getErrorCode());
+        assertEquals("Bạn chỉ được phép xem danh sách nhân sự trong phòng ban của mình.", ex.getMessage());
     }
 }

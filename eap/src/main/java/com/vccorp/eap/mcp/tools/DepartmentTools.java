@@ -4,8 +4,8 @@ import com.vccorp.eap.common.error.ErrorCode;
 import com.vccorp.eap.common.exception.BusinessException;
 import com.vccorp.eap.dto.department.CreateDepartmentRequest;
 import com.vccorp.eap.dto.department.DepartmentResponse;
-import com.vccorp.eap.mcp.annotation.McpTool;
-import com.vccorp.eap.mcp.annotation.McpToolParam;
+import org.springaicommunity.mcp.annotation.McpTool;
+import org.springaicommunity.mcp.annotation.McpToolParam;
 import com.vccorp.eap.service.department.DepartmentService;
 import org.springframework.stereotype.Component;
 
@@ -30,9 +30,7 @@ public class DepartmentTools implements McpToolFacade {
      */
     @McpTool(
             name = "listDepartments",
-            description = "Lấy toàn bộ danh sách các phòng ban đang hoạt động trong công ty.",
-            startLabel = "Đang tra cứu danh sách các phòng ban...",
-            endLabel = "Đã lấy danh sách phòng ban thành công"
+            description = "Lấy toàn bộ danh sách các phòng ban đang hoạt động trong công ty."
     )
     public List<DepartmentResponse> listDepartments() {
         return departmentService.listDepartments();
@@ -40,13 +38,10 @@ public class DepartmentTools implements McpToolFacade {
 
     /**
      * Tool: Đăng ký (tạo mới) một phòng ban trong hệ thống EAP.
-     * Yêu cầu quyền Quản trị viên (ROLE_SYSTEM_ADMIN).
      */
     @McpTool(
             name = "createDepartment",
-            description = "Đăng ký (tạo mới) một phòng ban trong hệ thống EAP. Yêu cầu quyền Quản trị viên (ROLE_SYSTEM_ADMIN).",
-            startLabel = "Đang đăng ký phòng ban '{{name}}'...",
-            endLabel = "Đã đăng ký phòng ban '{{name}}' thành công"
+            description = "Đăng ký (tạo mới) một phòng ban trong hệ thống EAP."
     )
     public DepartmentResponse createDepartment(
             @McpToolParam(description = "Mã viết tắt của phòng ban, viết HOA, không dấu tiếng Việt, không khoảng trắng, tương tự các mã trong hệ thống như HR, RND, KETOAN, FIN, BOARD (regex: ^[A-Z0-9_-]+$)") String code,
@@ -66,9 +61,7 @@ public class DepartmentTools implements McpToolFacade {
      */
     @McpTool(
             name = "getDepartmentByName",
-            description = "Tìm kiếm thông tin chi tiết và mã định danh UUID của một phòng ban theo tên gọi tiếng Việt. Trả về Optional rỗng nếu không tìm thấy.",
-            startLabel = "Đang tra cứu thông tin phòng ban '{{name}}'...",
-            endLabel = "Đã tìm thấy thông tin phòng ban '{{name}}'"
+            description = "Tìm kiếm thông tin chi tiết và mã định danh UUID của một phòng ban theo tên gọi tiếng Việt. Trả về Optional rỗng nếu không tìm thấy."
     )
     public Optional<DepartmentResponse> getDepartmentByName(
             @McpToolParam(description = "Tên phòng ban cần tra cứu (ví dụ: 'Nhân sự', 'Phát triển')") String name
@@ -82,6 +75,37 @@ public class DepartmentTools implements McpToolFacade {
             throw new BusinessException(ErrorCode.DEPARTMENT_NOT_FOUND, message);
         }
         return dept;
+    }
+
+    /**
+     * Tool: Cập nhật thông tin phòng ban (mã, tên, mô tả). Chỉ dành cho Quản trị viên (ROLE_SYSTEM_ADMIN).
+     */
+    @McpTool(
+            name = "updateDepartment",
+            description = "Cập nhật thông tin phòng ban theo mã định danh UUID. Chỉ dành cho Quản trị viên (ROLE_SYSTEM_ADMIN)."
+    )
+    public DepartmentResponse updateDepartment(
+            @McpToolParam(description = "Mã định danh UUID của phòng ban cần cập nhật (lấy từ getDepartmentByName)") java.util.UUID id,
+            @McpToolParam(description = "Mã viết tắt mới của phòng ban (regex: ^[A-Z0-9_-]+$)", required = false) String code,
+            @McpToolParam(description = "Tên mới của phòng ban bằng tiếng Việt có dấu", required = false) String name,
+            @McpToolParam(description = "Mô tả chức năng nhiệm vụ mới của phòng ban", required = false) String description
+    ) {
+        com.vccorp.eap.dto.department.UpdateDepartmentRequest request = new com.vccorp.eap.dto.department.UpdateDepartmentRequest(code, name, description);
+        return departmentService.updateDepartment(id, request);
+    }
+
+    /**
+     * Tool: Xóa phòng ban khỏi hệ thống theo mã định danh UUID. Chỉ dành cho Quản trị viên (ROLE_SYSTEM_ADMIN).
+     */
+    @McpTool(
+            name = "deleteDepartment",
+            description = "Xóa phòng ban khỏi hệ thống theo mã định danh UUID. Chỉ dành cho Quản trị viên (ROLE_SYSTEM_ADMIN)."
+    )
+    public String deleteDepartment(
+            @McpToolParam(description = "Mã định danh UUID của phòng ban cần xóa (lấy từ getDepartmentByName)") java.util.UUID id
+    ) {
+        departmentService.deleteDepartment(id);
+        return "Đã xóa phòng ban thành công.";
     }
 }
 

@@ -6,8 +6,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.ai.model.function.FunctionCallback;
+import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.ToolCallbackProvider;
+import org.springframework.ai.tool.definition.ToolDefinition;
 
 import java.util.Map;
 import java.util.Optional;
@@ -17,6 +18,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
+@org.mockito.junit.jupiter.MockitoSettings(strictness = org.mockito.quality.Strictness.LENIENT)
 class ToolCatalogRegistryTest {
 
     @Mock
@@ -27,17 +29,23 @@ class ToolCatalogRegistryTest {
 
     @BeforeEach
     void setUp() {
-        FunctionCallback mockCallback1 = mock(FunctionCallback.class);
-        when(mockCallback1.getName()).thenReturn("listDepartments");
-        when(mockCallback1.getDescription()).thenReturn("Lấy toàn bộ danh sách các phòng ban.");
-        when(mockCallback1.getInputTypeSchema()).thenReturn("{\"type\":\"object\",\"properties\":{},\"required\":[]}");
+        ToolDefinition def1 = mock(ToolDefinition.class);
+        when(def1.name()).thenReturn("listDepartments");
+        when(def1.description()).thenReturn("Lấy toàn bộ danh sách các phòng ban.");
+        when(def1.inputSchema()).thenReturn("{\"type\":\"object\",\"properties\":{},\"required\":[]}");
 
-        FunctionCallback mockCallback2 = mock(FunctionCallback.class);
-        when(mockCallback2.getName()).thenReturn("createDepartment");
-        when(mockCallback2.getDescription()).thenReturn("Đăng ký một phòng ban mới.");
-        when(mockCallback2.getInputTypeSchema()).thenReturn("{\"type\":\"object\",\"properties\":{\"code\":{\"type\":\"string\",\"description\":\"Mã phòng ban\"},\"name\":{\"type\":\"string\",\"description\":\"Tên phòng ban\"},\"description\":{\"type\":\"string\",\"description\":\"Mô tả phòng ban\"}},\"required\":[\"code\",\"name\"]}");
+        ToolCallback mockCallback1 = mock(ToolCallback.class);
+        when(mockCallback1.getToolDefinition()).thenReturn(def1);
 
-        when(toolCallbackProvider.getToolCallbacks()).thenReturn(new FunctionCallback[]{mockCallback1, mockCallback2});
+        ToolDefinition def2 = mock(ToolDefinition.class);
+        when(def2.name()).thenReturn("createDepartment");
+        when(def2.description()).thenReturn("Đăng ký một phòng ban mới.");
+        when(def2.inputSchema()).thenReturn("{\"type\":\"object\",\"properties\":{\"code\":{\"type\":\"string\",\"description\":\"Mã phòng ban\"},\"name\":{\"type\":\"string\",\"description\":\"Tên phòng ban\"},\"description\":{\"type\":\"string\",\"description\":\"Mô tả phòng ban\"}},\"required\":[\"code\",\"name\"]}");
+
+        ToolCallback mockCallback2 = mock(ToolCallback.class);
+        when(mockCallback2.getToolDefinition()).thenReturn(def2);
+
+        when(toolCallbackProvider.getToolCallbacks()).thenReturn(new ToolCallback[]{mockCallback1, mockCallback2});
 
         com.vccorp.eap.service.department.DepartmentService departmentService = mock(com.vccorp.eap.service.department.DepartmentService.class);
         com.vccorp.eap.mcp.tools.DepartmentTools departmentTools = new com.vccorp.eap.mcp.tools.DepartmentTools(departmentService);

@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { getAccessToken, getApiBaseUrl } from '@/api/client';
+import { useAuth } from '@/store/AuthContext';
 import { MessageSquare, X, Send, Bot, FileText, Sparkles, Loader2, CheckCircle2, AlertCircle, ChevronDown, ChevronRight } from 'lucide-react';
 
 interface ReasoningStep {
@@ -24,6 +25,15 @@ interface Message {
   statusMessage?: string;
 }
 
+const cleanPlainText = (text: string): string => {
+  if (!text) return '';
+  return text
+    .replace(/\*\*/g, '')
+    .replace(/(^|\n)\s*\*\s+/g, '$1- ')
+    .replace(/\*([^*]+)\*/g, '$1')
+    .trim();
+};
+
 const ReasoningPanel: React.FC<{ steps?: ReasoningStep[] }> = ({ steps }) => {
   const [expanded, setExpanded] = useState(false);
 
@@ -47,7 +57,7 @@ const ReasoningPanel: React.FC<{ steps?: ReasoningStep[] }> = ({ steps }) => {
           {steps.map((s, idx) => (
             <div key={idx} className="leading-relaxed bg-white/70 dark:bg-zinc-900/60 p-2 rounded-lg border border-indigo-100 dark:border-indigo-900/40">
               <div className="font-semibold text-indigo-600 dark:text-indigo-400 mb-0.5">Bước {s.step}:</div>
-              <div className="italic whitespace-pre-wrap">{s.thought}</div>
+              <div className="italic whitespace-pre-wrap">{cleanPlainText(s.thought)}</div>
             </div>
           ))}
         </div>
@@ -56,21 +66,44 @@ const ReasoningPanel: React.FC<{ steps?: ReasoningStep[] }> = ({ steps }) => {
   );
 };
 
+const INITIAL_MESSAGE: Message = {
+  sender: 'assistant',
+  text: 'Trợ lý EAP AI: Hỗ trợ điều hướng công cụ hệ thống và tra cứu tài liệu nội bộ.'
+};
+
 export const ChatWidget: React.FC = () => {
+  const { user, isAuthenticated, loading: authLoading } = useAuth();
   const [isOpen, setIsOpen] = useState(false);
   const [input, setInput] = useState('');
-  const [messages, setMessages] = useState<Message[]>([
-    { 
-      sender: 'assistant', 
-      text: 'Xin chào! Tôi là Trợ lý EAP AI. Tôi có thể hỗ trợ bạn tìm kiếm tài liệu, phòng ban, hoặc quản lý hệ thống. Bạn cần hỗ trợ gì hôm nay?' 
-    }
-  ]);
+  const [messages, setMessages] = useState<Message[]>([INITIAL_MESSAGE]);
   const [loading, setLoading] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const prevUserIdRef = useRef<string | null>(null);
+
+  // Tự động làm sạch toàn bộ cuộc hội thoại cũ khi đổi tài khoản hoặc khi đăng xuất
+  useEffect(() => {
+    if (user?.id) {
+      if (prevUserIdRef.current && prevUserIdRef.current !== user.id) {
+        setMessages([INITIAL_MESSAGE]);
+        setIsOpen(false);
+        setInput('');
+      }
+      prevUserIdRef.current = user.id;
+    } else {
+      setMessages([INITIAL_MESSAGE]);
+      setIsOpen(false);
+      setInput('');
+      prevUserIdRef.current = null;
+    }
+  }, [user?.id, isAuthenticated]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isOpen, loading]);
+
+  if (authLoading || !isAuthenticated) {
+    return null;
+  }
 
   const handleSend = async () => {
     if (!input.trim() || loading) return;
@@ -203,19 +236,30 @@ export const ChatWidget: React.FC = () => {
                 lastMsg.steps = currentSteps;
                 lastMsg.statusMessage = eventData.label;
               } else if (eventName === 'content') {
-                lastMsg.text = eventData.text || '';
+                lastMsg.text = cleanPlainText(eventData.text || '');
                 if (eventData.chunks && Array.isArray(eventData.chunks)) {
                   lastMsg.chunks = eventData.chunks;
                 }
                 lastMsg.isThinking = false;
                 lastMsg.statusMessage = undefined;
               } else if (eventName === 'error') {
-                lastMsg.text = eventData.message ? `⚠️ ${eventData.message}` : '⚠️ Có lỗi xảy ra trong quá trình xử lý.';
+                const errMsg = eventData.message ? cleanPlainText(eventData.message) : 'Có lỗi xảy ra trong quá trình xử lý.';
+                lastMsg.text = errMsg.startsWith('⚠️') ? errMsg : `⚠️ ${errMsg}`;
                 lastMsg.isThinking = false;
                 lastMsg.statusMessage = undefined;
+                if (lastMsg.steps && lastMsg.steps.length > 0) {
+                  lastMsg.steps = lastMsg.steps.map(s =>
+                    s.status === 'CALLING_TOOL' ? { ...s, status: 'ERROR' as const } : s
+                  );
+                }
               } else if (eventName === 'done') {
                 lastMsg.isThinking = false;
                 lastMsg.statusMessage = undefined;
+                if (lastMsg.steps && lastMsg.steps.length > 0) {
+                  lastMsg.steps = lastMsg.steps.map(s =>
+                    s.status === 'CALLING_TOOL' ? { ...s, status: 'SUCCESS' as const } : s
+                  );
+                }
               }
 
               updated[updated.length - 1] = lastMsg;
@@ -231,15 +275,21 @@ export const ChatWidget: React.FC = () => {
         const updated = [...prev];
         const lastMsg = { ...updated[updated.length - 1] };
         if (lastMsg && lastMsg.sender === 'assistant') {
-          lastMsg.text = error?.message || 'Hệ thống đang gặp sự cố kết nối, xin vui lòng thử lại sau.';
+          const rawErr = error?.message || 'Hệ thống đang gặp sự cố kết nối, xin vui lòng thử lại sau.';
+          lastMsg.text = cleanPlainText(rawErr);
           lastMsg.isThinking = false;
           lastMsg.statusMessage = undefined;
+          if (lastMsg.steps && lastMsg.steps.length > 0) {
+            lastMsg.steps = lastMsg.steps.map(s =>
+              s.status === 'CALLING_TOOL' ? { ...s, status: 'ERROR' as const } : s
+            );
+          }
           updated[updated.length - 1] = lastMsg;
           return updated;
         }
         return [...prev, {
           sender: 'assistant',
-          text: error?.message || 'Hệ thống đang gặp sự cố kết nối, xin vui lòng thử lại sau.'
+          text: cleanPlainText(error?.message || 'Hệ thống đang gặp sự cố kết nối, xin vui lòng thử lại sau.')
         }];
       });
     } finally {
@@ -250,6 +300,11 @@ export const ChatWidget: React.FC = () => {
         if (lastMsg && lastMsg.sender === 'assistant') {
           lastMsg.isThinking = false;
           lastMsg.statusMessage = undefined;
+          if (lastMsg.steps && lastMsg.steps.length > 0) {
+            lastMsg.steps = lastMsg.steps.map(s =>
+              s.status === 'CALLING_TOOL' ? { ...s, status: 'ERROR' as const } : s
+            );
+          }
           // Nếu không có cả text lẫn steps mà luồng đã kết thúc
           if (!lastMsg.text && (!lastMsg.steps || lastMsg.steps.length === 0)) {
             lastMsg.text = 'Đã hoàn tất xử lý yêu cầu.';
@@ -363,7 +418,7 @@ export const ChatWidget: React.FC = () => {
 
                   {/* Message Content */}
                   {msg.text && (
-                    <p className="text-sm whitespace-pre-line leading-relaxed">{msg.text}</p>
+                    <p className="text-sm whitespace-pre-line leading-relaxed">{cleanPlainText(msg.text)}</p>
                   )}
 
                   {/* Thinking Status Indicator */}

@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
@@ -442,5 +443,46 @@ public class DocumentServiceImpl implements DocumentService {
                 .lastCompletedChunk(0)
                 .totalChunks(0)
                 .build();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public DocumentResponse getDocumentByTitle(String title, User currentUser) {
+        uploadValidator.validateUserRole(currentUser);
+        uploadValidator.validateUserDepartment(currentUser);
+
+        if (title == null || title.trim().isEmpty()) {
+            throw new BusinessException(ErrorCode.ERR_INVALID_REQUEST, "Tiêu đề tài liệu không được để trống.");
+        }
+        String cleanTitle = title.trim();
+        UUID deptId = currentUser.getDepartmentId();
+
+        // 1. Tìm tài liệu gốc thuộc phòng ban mình
+        Optional<Document> docOpt = documentRepository.findByTitleIgnoreCaseAndParentIdIsNullAndOwnerDepartmentIdAndDeletedAtIsNull(cleanTitle, deptId)
+                .or(() -> {
+                    List<Document> matches = documentRepository.findByTitleContainingIgnoreCaseAndParentIdIsNullAndOwnerDepartmentIdAndDeletedAtIsNull(cleanTitle, deptId);
+                    return matches.stream().findFirst();
+                });
+
+        if (docOpt.isPresent()) {
+            return documentMapper.mapToResponse(docOpt.get());
+        }
+
+        // 2. Tìm tài liệu Alias được chia sẻ cho phòng ban mình
+        List<Document> sharedAliases = documentRepository.findAll().stream()
+                .filter(d -> d.getParentId() != null
+                        && d.getOwnerDepartmentId().equals(deptId)
+                        && d.getDeletedAt() == null
+                        && d.getTitle() != null
+                        && (d.getTitle().equalsIgnoreCase(cleanTitle) || d.getTitle().toLowerCase().contains(cleanTitle.toLowerCase())))
+                .toList();
+
+        if (!sharedAliases.isEmpty()) {
+            Document aliasDoc = sharedAliases.get(0);
+            return documentMapper.mapToResponse(aliasDoc);
+        }
+
+        throw new BusinessException(ErrorCode.ERR_DOCUMENT_NOT_FOUND,
+                "Không tìm thấy tài liệu có tiêu đề '" + cleanTitle + "' trong kho tri thức của phòng ban bạn.");
     }
 }

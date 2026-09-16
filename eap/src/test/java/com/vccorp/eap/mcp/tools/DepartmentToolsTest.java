@@ -9,7 +9,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import com.vccorp.eap.mcp.annotation.McpTool;
+import org.springaicommunity.mcp.annotation.McpTool;
 
 import java.lang.reflect.Method;
 import java.util.List;
@@ -96,5 +96,39 @@ class DepartmentToolsTest {
         Method getMethod = DepartmentTools.class.getMethod("getDepartmentByName", String.class);
         assertTrue(getMethod.isAnnotationPresent(McpTool.class));
         assertEquals("getDepartmentByName", getMethod.getAnnotation(McpTool.class).name());
+
+        Method updateMethod = DepartmentTools.class.getMethod("updateDepartment", UUID.class, String.class, String.class, String.class);
+        assertTrue(updateMethod.isAnnotationPresent(McpTool.class));
+        assertEquals("updateDepartment", updateMethod.getAnnotation(McpTool.class).name());
+
+        Method deleteMethod = DepartmentTools.class.getMethod("deleteDepartment", UUID.class);
+        assertTrue(deleteMethod.isAnnotationPresent(McpTool.class));
+        assertEquals("deleteDepartment", deleteMethod.getAnnotation(McpTool.class).name());
+    }
+
+    @Test
+    void testUpdateDepartment_DelegatesToService() {
+        UUID id = UUID.randomUUID();
+        DepartmentResponse response = DepartmentResponse.builder(id, "RND_NEW", "Phát triển mới").build();
+        when(departmentService.updateDepartment(eq(id), any())).thenReturn(response);
+
+        DepartmentResponse result = departmentTools.updateDepartment(id, "RND_NEW", "Phát triển mới", "Mô tả mới");
+
+        assertNotNull(result);
+        assertEquals("RND_NEW", result.code());
+        assertEquals("Phát triển mới", result.name());
+        verify(departmentService, times(1)).updateDepartment(eq(id), any());
+    }
+
+    @Test
+    void testDeleteDepartment_DelegatesToService() {
+        UUID id = UUID.randomUUID();
+        doNothing().when(departmentService).deleteDepartment(id);
+
+        String result = departmentTools.deleteDepartment(id);
+
+        assertNotNull(result);
+        assertTrue(result.contains("thành công"));
+        verify(departmentService, times(1)).deleteDepartment(id);
     }
 }

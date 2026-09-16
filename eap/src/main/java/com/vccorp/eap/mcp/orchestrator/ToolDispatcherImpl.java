@@ -3,8 +3,8 @@ package com.vccorp.eap.mcp.orchestrator;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.vccorp.eap.common.error.ErrorCode;
 import com.vccorp.eap.common.exception.BusinessException;
-import com.vccorp.eap.mcp.annotation.McpTool;
-import com.vccorp.eap.mcp.annotation.McpToolParam;
+import org.springaicommunity.mcp.annotation.McpTool;
+import org.springaicommunity.mcp.annotation.McpToolParam;
 import com.vccorp.eap.mcp.tools.DepartmentTools;
 import com.vccorp.eap.mcp.tools.DocumentTools;
 import com.vccorp.eap.mcp.tools.McpToolFacade;
@@ -93,9 +93,9 @@ public class ToolDispatcherImpl implements ToolDispatcher {
             Parameter param = parameters[i];
             McpToolParam paramAnno = param.getAnnotation(McpToolParam.class);
 
-            String paramName = (paramAnno != null && !paramAnno.name().isEmpty())
-                    ? paramAnno.name().trim()
-                    : ((paramNames != null && i < paramNames.length && paramNames[i] != null) ? paramNames[i] : param.getName());
+            String paramName = (paramNames != null && i < paramNames.length && paramNames[i] != null)
+                    ? paramNames[i]
+                    : param.getName();
 
             boolean isRequired = paramAnno == null || paramAnno.required();
             Object rawValue = arguments != null ? arguments.get(paramName) : null;

@@ -122,6 +122,8 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
     @Override
     public void executeStream(String userPrompt, SseEmitter emitter) {
         User currentUser = SecurityContextHelper.getCurrentUser();
+        int turn = 1;
+        String activeAction = null;
 
         try {
             // Sự kiện 1: Phân tích ban đầu (thinking)
@@ -132,7 +134,8 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
             conversationHistory.append("User Request: ").append(userPrompt).append("\n");
 
             List<ChunkResultDto> lastSearchChunks = null;
-            int turn = 1;
+            Map<String, Object> activeActionInput = null;
+
             while (true) {
                 toolLoopGuard.validateTurn(turn);
 
@@ -164,14 +167,17 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
                             ? parsed.get("final_answer").toString()
                             : (parsed.get("text") != null ? parsed.get("text").toString() : "Hoàn tất yêu cầu.");
 
-                    log.info("[AgentOrchestrator][Turn {}][FinalAnswer] {}", turn, finalAnswer);
-                    sendEvent(emitter, "content", AssistantStreamEvent.content(turn, finalAnswer, lastSearchChunks));
+                    String sanitizedFinalAnswer = sanitizeFormatting(finalAnswer);
+                    log.info("[AgentOrchestrator][Turn {}][FinalAnswer] {}", turn, sanitizedFinalAnswer);
+                    sendEvent(emitter, "content", AssistantStreamEvent.content(turn, sanitizedFinalAnswer, lastSearchChunks));
                     sendEvent(emitter, "done", AssistantStreamEvent.done());
                     emitter.complete();
                     return;
                 }
 
                 // Phát hiện tool call -> Tiến hành gọi công cụ
+                activeAction = action;
+                activeActionInput = actionInput;
                 log.info("[AgentOrchestrator][Turn {}][Action] Calling tool '{}' with input: {}", turn, action, actionInput);
                 String startLabel = buildActionStartLabel(action, actionInput);
                 sendEvent(emitter, "action_start", AssistantStreamEvent.actionStart(turn, action, startLabel));
@@ -190,6 +196,8 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
 
                 String endLabel = buildActionEndLabel(action, actionInput);
                 sendEvent(emitter, "action_end", AssistantStreamEvent.actionEnd(turn, action, "SUCCESS", endLabel));
+                activeAction = null;
+                activeActionInput = null;
 
                 // Ghi nhận kết quả vào ngữ cảnh hội thoại cho turn kế tiếp
                 conversationHistory.append("\nStep ").append(turn).append(": Action '").append(action)
@@ -200,16 +208,38 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
 
         } catch (BusinessException be) {
             log.warn("BusinessException trong AgentOrchestrator: [{}] {}", be.getErrorCode(), be.getMessage());
-            sendEventSafe(emitter, "error", AssistantStreamEvent.error(be.getErrorCode().name(), be.getMessage()));
+            String userFriendlyMessage = (be.getErrorCode() == ErrorCode.ERR_FORBIDDEN_ROLE)
+                    ? "Bạn không có quyền thực hiện yêu cầu này."
+                    : be.getMessage();
+            if (activeAction != null) {
+                sendEventSafe(emitter, "action_end", AssistantStreamEvent.actionEnd(turn, activeAction, "ERROR", userFriendlyMessage));
+            }
+            sendEventSafe(emitter, "error", AssistantStreamEvent.error(be.getErrorCode().name(), userFriendlyMessage));
             sendEventSafe(emitter, "done", AssistantStreamEvent.done());
             emitter.complete();
         } catch (Exception ex) {
             log.error("Lỗi ngoại lệ hệ thống trong AgentOrchestrator: ", ex);
+            if (activeAction != null) {
+                sendEventSafe(emitter, "action_end", AssistantStreamEvent.actionEnd(turn, activeAction, "ERROR", "Thao tác gặp lỗi"));
+            }
             sendEventSafe(emitter, "error", AssistantStreamEvent.error(ErrorCode.ERR_SYSTEM_ERROR.name(),
-                    "Có lỗi xảy ra trong quá trình trợ lý xử lý: " + ex.getMessage()));
+                    "Có lỗi xảy ra trong quá trình trợ lý xử lý. Vui lòng thử lại sau."));
             sendEventSafe(emitter, "done", AssistantStreamEvent.done());
             emitter.complete();
         }
+    }
+
+    private String sanitizeFormatting(String text) {
+        if (text == null) {
+            return "";
+        }
+        // Loại bỏ hoàn toàn các dấu ** (in đậm)
+        String cleaned = text.replace("**", "");
+        // Thay thế các bullet kiểu "* " ở đầu dòng bằng "- "
+        cleaned = cleaned.replaceAll("(?m)^\\s*\\*\\s+", "- ");
+        // Loại bỏ các dấu * bao quanh từ đơn (*text* -> text)
+        cleaned = cleaned.replaceAll("\\*([^*]+)\\*", "$1");
+        return cleaned.trim();
     }
 
     private String buildSystemPrompt(User user) {
@@ -228,38 +258,35 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
                 NGUYÊN TẮC VẬN HÀNH & SUY LUẬN TỰ CHỦ:
                 1. Phân tích ý định & bối cảnh:
                    - Đọc kỹ yêu cầu của người dùng cùng lịch sử đối thoại.
-                   - Tự đối chiếu mục tiêu của người dùng với mô tả, chức năng và schema của từng công cụ trong danh sách trên để quyết định xem có cần gọi công cụ hay không.
-                2. Hướng dẫn phân định ý định & chọn công cụ:
-                   - Nhóm 1 (Tra cứu tri thức & thông tin nội bộ):
-                     Khi người dùng hỏi bất kỳ thông tin nào cần tra cứu dữ liệu doanh nghiệp (quy định, chính sách, quy chế, nội quy, tài liệu kỹ thuật, thông tin dự án, biên bản, hợp đồng, báo cáo, hướng dẫn quy trình...) -> BẮT BUỘC gọi công cụ `searchDocuments`.
-                   - Nhóm 2 (Thực thi tác vụ & hành động hệ thống):
-                     Khi người dùng yêu cầu hành động nghiệp vụ (tạo mới, sửa đổi, tra cứu danh sách hoặc cấu hình thực thể...) -> Gọi công cụ hành động tương ứng (ví dụ `createDepartment`, `listDepartments`, `getDepartmentByName`...).
-                   - Nhóm 3 (Xâu chuỗi đa tác vụ):
-                     Khi yêu cầu đòi hỏi kết hợp nhiều bước (ví dụ vừa tra cứu vừa tạo/sửa) -> Thực hiện từng bước công cụ theo chuỗi logic trước khi tổng kết.
-                   - Nhóm 4 (Hội thoại thông thường & Xã giao):
-                     Khi người dùng chào hỏi, cảm ơn, hỏi các câu giao tiếp xã giao thông thường không liên quan đến dữ liệu nội bộ -> KHÔNG gọi công cụ, lập tức trả về `FINAL_ANSWER`.
-                3. Tự suy luận & trích xuất tham số:
-                   - Chỉ gọi công cụ khi cần dữ liệu hoặc cần thực hiện tác vụ nghiệp vụ tương ứng với năng lực của công cụ đó.
-                   - Tự suy luận, chuẩn hóa và trích xuất đúng các tham số đầu vào (`action_input`) tuân thủ nghiêm ngặt mô tả và cấu trúc `Input schema` của công cụ được chọn.
-                   - Lưu ý kiểm tra vai trò người dùng (ROLE) đối với những hành động yêu cầu quyền quản trị viên.
-                4. Đánh giá kết quả & xâu chuỗi:
-                   - Sau khi nhận kết quả từ công cụ, tự đánh giá xem đã đủ dữ liệu để trả lời trọn vẹn yêu cầu hay cần gọi thêm công cụ khác để tiếp tục xâu chuỗi thông tin.
-                   - Nếu không cần gọi công cụ hoặc khi đã có đủ kết quả xử lý, hãy tổng hợp câu trả lời cuối cùng (`FINAL_ANSWER`).
+                   - Đối chiếu mục tiêu của người dùng với danh sách công cụ được cấp.
+                2. NGUYÊN TẮC PHÂN LOẠI XỬ LÝ (CHỈ CÓ 2 LOẠI DUY NHẤT, TUYỆT ĐỐI KHÔNG TRẢ LỜI XÃ GIAO / CHIT-CHAT):
+                   - Loại 1 (Điều hướng công cụ hệ thống):
+                     Khi người dùng yêu cầu hành động nghiệp vụ, thao tác dữ liệu hoặc quản lý thực thể (ví dụ tạo phòng ban, xem danh sách phòng ban...) -> BẮT BUỘC gọi công cụ hành động tương ứng (ví dụ `createDepartment`, `listDepartments`, `getDepartmentByName`...). Quyền hạn sẽ được hệ thống kiểm tra và thực thi tự động bên trong tool/service.
+                   - Loại 2 (Tra cứu tài liệu nội bộ):
+                     Tất cả các yêu cầu tìm kiếm, hỏi đáp thông tin, dữ liệu, quy định, chính sách, hoặc mọi câu hỏi khác -> BẮT BUỘC gọi công cụ `searchDocuments`.
+                     TUYỆT ĐỐI KHÔNG tự suy luận, không sử dụng kiến thức mở ngoài hệ thống, không tra cứu mạng internet.
+                   - CẤM XÃ GIAO: TUYỆT ĐỐI KHÔNG trả lời xã giao, không chào hỏi dông dài, không tán gẫu, không chit-chat. Mọi câu người dùng gửi đến (kể cả câu chào hỏi ngắn) đều BẮT BUỘC phải quy về một trong 2 loại trên: nếu có hành động nghiệp vụ thì điều hướng công cụ, còn lại thì gọi tra cứu tài liệu nội bộ.
+                3. Nguyên tắc nghiêm ngặt về cơ sở dữ liệu và bảo mật:
+                   - Tuyệt đối không tự bịa đặt câu trả lời. Nếu công cụ `searchDocuments` không tìm thấy thông tin hoặc thông tin không có trong tài liệu người dùng được phép tiếp cận, hãy trả lời trong `FINAL_ANSWER` ngắn gọn rằng không tìm thấy thông tin phù hợp trong hệ thống tài liệu.
+                   - Khi phản hồi từ chối hoặc người dùng không có quyền: Trả lời thật ngắn gọn (Ví dụ: "Bạn không có quyền thực hiện yêu cầu này."). TUYỆT ĐỐI KHÔNG đưa các thuật ngữ kỹ thuật hay thông tin hệ thống nội bộ vào câu trả lời (như tên role ROLE_EMPLOYEE, ROLE_SYSTEM_ADMIN, mã lỗi, tên cơ sở dữ liệu...).
+                4. Quy cách định dạng văn bản:
+                   - TUYỆT ĐỐI KHÔNG dùng định dạng in đậm, không dùng các ký tự dấu hoa thị (* hoặc **) trong câu trả lời.
+                   - Trình bày dạng văn bản thuần túy (plain text) trực diện, ngắn gọn, không rườm rà, sử dụng dấu gạch ngang (-) cho các danh sách liệt kê nếu có.
                 5. Trình bày suy luận:
-                   - Luôn trình bày tư duy logic, nhận định bối cảnh và lý do lựa chọn hành động trong trường `thought`.
+                   - Luôn trình bày tư duy logic và lý do lựa chọn công cụ trong trường `thought`.
                 
                 QUY CÁCH PHẢN HỒI (BẮT BUỘC TRẢ VỀ DUY NHẤT 1 CHUỖI JSON HỢP LỆ):
                 - Khi quyết định cần gọi công cụ:
                   {
-                    "thought": "Trình bày suy luận logic vì sao cần gọi công cụ này và cách chuẩn bị tham số...",
+                    "thought": "Trình bày suy luận vì sao chọn công cụ này...",
                     "action": "<tên_công_cụ>",
                     "action_input": { ... }
                   }
-                - Khi đã đủ thông tin hoặc không cần gọi công cụ:
+                - Khi đã đủ thông tin từ công cụ:
                   {
-                    "thought": "Trình bày suy luận kết luận hoặc lý do đưa ra phản hồi trực tiếp...",
+                    "thought": "Trình bày suy luận kết luận từ kết quả công cụ...",
                     "action": "FINAL_ANSWER",
-                    "final_answer": "Nội dung phản hồi hoàn chỉnh bằng tiếng Việt rõ ràng, chuyên nghiệp và thân thiện."
+                    "final_answer": "Nội dung phản hồi hoàn chỉnh, đi thẳng vào trọng tâm, ngắn gọn, không xã giao, không chứa dấu * hoặc **."
                   }
                 """.formatted(currentTimeStr, user.getUsername(), user.getRole().name(), toolList);
     }

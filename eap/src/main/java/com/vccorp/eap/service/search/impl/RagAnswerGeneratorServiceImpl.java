@@ -24,6 +24,7 @@ public class RagAnswerGeneratorServiceImpl implements RagAnswerGeneratorService 
         2. Tuyệt đối không tự bịa đặt, không đưa ra thông tin không có trong Context.
         3. Nếu Context được cung cấp không chứa đủ thông tin để trả lời câu hỏi, hãy phản hồi: "Rất tiếc, thông tin này không có trong các tài liệu bạn có quyền truy cập."
         4. Trả lời bằng tiếng Việt, trình bày mạch lạc, ngắn gọn và chính xác.
+        5. TUYỆT ĐỐI KHÔNG dùng định dạng in đậm, không dùng các ký tự dấu hoa thị (* hoặc **) trong câu trả lời. Trình bày dạng văn bản thuần túy (plain text), dùng dấu gạch ngang (-) cho các danh sách liệt kê nếu có.
         """;
 
     private final LlmClient llmClient;
@@ -33,6 +34,16 @@ public class RagAnswerGeneratorServiceImpl implements RagAnswerGeneratorService 
 
     public RagAnswerGeneratorServiceImpl(LlmClient llmClient) {
         this.llmClient = llmClient;
+    }
+
+    private String sanitizeFormatting(String text) {
+        if (text == null) {
+            return "";
+        }
+        String cleaned = text.replace("**", "");
+        cleaned = cleaned.replaceAll("(?m)^\\s*\\*\\s+", "- ");
+        cleaned = cleaned.replaceAll("\\*([^*]+)\\*", "$1");
+        return cleaned.trim();
     }
 
     @Override
@@ -66,7 +77,7 @@ public class RagAnswerGeneratorServiceImpl implements RagAnswerGeneratorService 
 
         if (generatedAnswer != null && !generatedAnswer.isBlank()) {
             log.info("LLM đã sinh câu trả lời thành công.");
-            return generatedAnswer.trim();
+            return sanitizeFormatting(generatedAnswer);
         }
 
         log.warn("LLM không trả về kết quả sinh văn bản hoặc bị timeout. Sử dụng fallback response.");
@@ -74,6 +85,6 @@ public class RagAnswerGeneratorServiceImpl implements RagAnswerGeneratorService 
         for (ChunkResultDto chunk : chunks) {
             fallbackBuilder.append(String.format("- %s %s\n", chunk.content(), chunk.citation()));
         }
-        return fallbackBuilder.toString();
+        return sanitizeFormatting(fallbackBuilder.toString());
     }
 }
