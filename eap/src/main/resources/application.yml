@@ -2,9 +2,6 @@ server:
   port: 8080
 
 spring:
-  autoconfigure:
-    exclude:
-      - org.springframework.ai.autoconfigure.vectorstore.pgvector.PgVectorStoreAutoConfiguration
   application:
     name: backend
   datasource:
@@ -52,8 +49,19 @@ spring:
     multipart:
       max-file-size: 50MB
       max-request-size: 50MB
+  threads:
+    virtual:
       enabled: true
+  mvc:
+    async:
+      request-timeout: 3600000
   ai:
+    mcp:
+      server:
+        name: vcc-eap-mcp-server
+        version: 1.0.0
+        type: sync
+        protocol: streamable
     embedding:
       transformer:
         onnx:
@@ -68,7 +76,7 @@ jwt:
 
 gemini:
   api-key: ${GEMINI_API_KEY:}
-  model: ${GEMINI_MODEL:gemini-3.6-flash}
+  model: ${GEMINI_MODEL:gemini-3.5-flash-lite}
   base-url: ${GEMINI_BASE_URL:https://generativelanguage.googleapis.com/v1beta/openai/chat/completions}
 
 
@@ -89,7 +97,7 @@ eap:
   rag:
     top-k: 3
   llm:
-    query-timeout-ms: 2000
+    query-timeout-ms: ${EAP_LLM_QUERY_TIMEOUT_MS:15000}
     chunk-timeout-ms: 40000
     connect-timeout-ms: 1000
 
@@ -97,6 +105,9 @@ logging:
   level:
     root: INFO
     com.vccorp.eap: INFO
+    com.vccorp.eap.mcp: DEBUG
+    io.modelcontextprotocol: DEBUG
+    org.springframework.ai.mcp: DEBUG
     com.vccorp.eap.service.lock: DEBUG
     com.vccorp.eap.service.storage: DEBUG
     com.zaxxer.hikari: INFO

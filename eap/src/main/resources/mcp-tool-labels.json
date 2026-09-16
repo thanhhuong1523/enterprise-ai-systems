@@ -1,0 +1,82 @@
+{
+  "listDepartments": {
+    "start": "Đang tra cứu danh sách các phòng ban...",
+    "end": "Đã lấy danh sách phòng ban thành công"
+  },
+  "createDepartment": {
+    "start": "Đang đăng ký phòng ban '{{name}}'...",
+    "end": "Đã đăng ký phòng ban '{{name}}' thành công"
+  },
+  "getDepartmentByName": {
+    "start": "Đang tra cứu thông tin phòng ban '{{name}}'...",
+    "end": "Đã tìm thấy thông tin phòng ban '{{name}}'"
+  },
+  "updateDepartment": {
+    "start": "Đang cập nhật thông tin phòng ban...",
+    "end": "Đã cập nhật thông tin phòng ban thành công"
+  },
+  "deleteDepartment": {
+    "start": "Đang xóa phòng ban khỏi hệ thống...",
+    "end": "Đã xóa phòng ban thành công"
+  },
+  "searchDocuments": {
+    "start": "Đang tra cứu tài liệu '{{query}}'...",
+    "end": "Đã hoàn tất tra cứu tài liệu"
+  },
+  "getDocumentByTitle": {
+    "start": "Đang tìm kiếm tài liệu có tiêu đề '{{title}}'...",
+    "end": "Đã tìm thấy tài liệu '{{title}}'"
+  },
+  "listOriginalDocuments": {
+    "start": "Đang lấy danh sách tài liệu của phòng ban...",
+    "end": "Đã lấy danh sách tài liệu thành công"
+  },
+  "updateOriginalDocument": {
+    "start": "Đang cập nhật tiêu đề tài liệu thành '{{title}}'...",
+    "end": "Đã cập nhật tiêu đề tài liệu thành công"
+  },
+  "deleteOriginalDocument": {
+    "start": "Đang xóa tài liệu khỏi kho tri thức...",
+    "end": "Đã xóa tài liệu thành công"
+  },
+  "createDocumentAlias": {
+    "start": "Đang thiết lập liên kết chia sẻ tài liệu...",
+    "end": "Đã chia sẻ tài liệu thành công"
+  },
+  "listSharedDocuments": {
+    "start": "Đang tra cứu danh sách tài liệu được chia sẻ...",
+    "end": "Đã lấy danh sách tài liệu chia sẻ thành công"
+  },
+  "listDocumentAliases": {
+    "start": "Đang kiểm tra danh sách phòng ban nhận chia sẻ...",
+    "end": "Đã lấy danh sách liên kết thành công"
+  },
+  "deleteDocumentAlias": {
+    "start": "Đang thu hồi liên kết chia sẻ tài liệu...",
+    "end": "Đã thu hồi liên kết thành công"
+  },
+  "createUser": {
+    "start": "Đang tạo tài khoản cho '{{fullName}}'...",
+    "end": "Đã tạo tài khoản cho '{{fullName}}' thành công"
+  },
+  "getUserByName": {
+    "start": "Đang tra cứu thông tin người dùng '{{name}}'...",
+    "end": "Đã tìm thấy thông tin người dùng '{{name}}'"
+  },
+  "listUsers": {
+    "start": "Đang lấy danh mục toàn bộ nhân sự...",
+    "end": "Đã lấy danh mục nhân sự thành công"
+  },
+  "listUsersByDepartment": {
+    "start": "Đang lấy danh sách nhân sự của phòng ban...",
+    "end": "Đã lấy danh sách nhân sự thành công"
+  },
+  "updateUser": {
+    "start": "Đang cập nhật thông tin nhân sự...",
+    "end": "Đã cập nhật thông tin nhân sự thành công"
+  },
+  "deleteUser": {
+    "start": "Đang xóa tài khoản nhân sự...",
+    "end": "Đã xóa tài khoản nhân sự thành công"
+  }
+}

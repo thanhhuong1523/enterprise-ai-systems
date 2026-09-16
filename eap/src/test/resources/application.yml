@@ -1,4 +1,96 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: backend-test
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/vcc_eap?currentSchema=public&stringtype=unspecified&tcpKeepAlive=true&reWriteBatchedInserts=true}
+    username: ${DB_USERNAME:vcc_admin}
+    password: ${DB_PASSWORD:secure_db_password}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      pool-name: EAP-Hikari-Pool-Test
+      maximum-pool-size: 5
+      minimum-idle: 1
+      initialization-fail-timeout: -1
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      timeout: 1000ms
+  jpa:
+    database-platform: org.hibernate.dialect.PostgreSQLDialect
+    hibernate:
+      ddl-auto: none
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        temp:
+          use_jdbc_metadata_defaults: false
+    show-sql: false
+  flyway:
+    enabled: false
+  servlet:
+    multipart:
+      max-file-size: 50MB
+      max-request-size: 50MB
+  threads:
+    virtual:
+      enabled: true
+  mvc:
+    async:
+      request-timeout: 3600000
+  ai:
+    mcp:
+      server:
+        name: vcc-eap-mcp-server
+        version: 1.0.0
+        type: sync
+        protocol: streamable
+    embedding:
+      transformer:
+        onnx:
+          modelUri: classpath:/onnx/model_quantized.onnx
+        tokenizer:
+          uri: classpath:/onnx/tokenizer.json
+
+jwt:
+  secret: ${JWT_SECRET:vcc-eap-super-secret-signing-key-256-bits-base64-secure-value-safe-for-hs256}
+  expiration-ms: 900000
+  refresh-expiration-ms: 604800000
+
+gemini:
+  api-key: ${GEMINI_API_KEY:dummy-key}
+  model: gemini-3.5-flash-lite
+  base-url: https://generativelanguage.googleapis.com/v1beta/openai/chat/completions
+
 eap:
   worker:
     scheduler:
       enabled: false
+  upload:
+    dir: ./eap-storage
+    temp-dir: ./eap-storage/tmp
+  chunking:
+    paragraph-separator: "\\n\\n"
+  retry:
+    max-attempts: 5
+    base-delay-ms: 350
+    max-delay-ms: 2000
+  cleanup:
+    cron: "0 0 2 * * *"
+    temp-expiration-ms: 86400000
+    orphan-grace-period-ms: 600000
+  rag:
+    top-k: 3
+  llm:
+    query-timeout-ms: 15000
+    chunk-timeout-ms: 40000
+    connect-timeout-ms: 1000
+
+logging:
+  level:
+    root: INFO
+    com.vccorp.eap: INFO

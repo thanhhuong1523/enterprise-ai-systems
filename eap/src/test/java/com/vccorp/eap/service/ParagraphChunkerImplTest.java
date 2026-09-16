@@ -1,10 +1,11 @@
 package com.vccorp.eap.service;
 
-import com.vccorp.eap.dto.ChunkDraft;
-import com.vccorp.eap.service.impl.ParagraphChunkerImpl;
+import com.vccorp.eap.dto.document.ChunkDraft;
+import com.vccorp.eap.service.document.impl.ParagraphChunkerImpl;
 import org.junit.jupiter.api.Test;
 import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
+import com.vccorp.eap.dto.document.PageContent;
 
 public class ParagraphChunkerImplTest {
 
@@ -161,8 +162,8 @@ public class ParagraphChunkerImplTest {
     public void testChunkByPage_PreservesPageNumbers() {
         ParagraphChunkerImpl chunker = new ParagraphChunkerImpl();
 
-        com.vccorp.eap.dto.PageContent page1 = new com.vccorp.eap.dto.PageContent(1, "1. Tổng quan trang 1\nNội dung trang một.");
-        com.vccorp.eap.dto.PageContent page2 = new com.vccorp.eap.dto.PageContent(2, "2. Chi tiết trang 2\nNội dung trang hai.");
+        com.vccorp.eap.dto.document.PageContent page1 = new com.vccorp.eap.dto.document.PageContent(1, "1. Tổng quan trang 1\nNội dung trang một.");
+        com.vccorp.eap.dto.document.PageContent page2 = new com.vccorp.eap.dto.document.PageContent(2, "2. Chi tiết trang 2\nNội dung trang hai.");
 
         List<ChunkDraft> chunks = chunker.chunkByPage(List.of(page1, page2));
 

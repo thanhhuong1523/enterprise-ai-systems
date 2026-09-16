@@ -1,7 +1,7 @@
 package com.vccorp.eap.repository;
 
-import com.vccorp.eap.dto.ChunkSearchResult;
-import com.vccorp.eap.dto.SearchContext;
+import com.vccorp.eap.dto.document.ChunkSearchResult;
+import com.vccorp.eap.dto.search.SearchContext;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;

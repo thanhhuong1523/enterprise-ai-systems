@@ -41,4 +41,8 @@ public interface DocumentRepository extends JpaRepository<Document, UUID>, Docum
                    "WHERE NOT EXISTS (SELECT 1 FROM tbl_documents d WHERE d.hash = temp_hashes.hash)", 
            nativeQuery = true)
     List<String> findOrphanHashes(@Param("fileHashes") String[] fileHashes);
+
+    Optional<Document> findByTitleIgnoreCaseAndParentIdIsNullAndOwnerDepartmentIdAndDeletedAtIsNull(String title, UUID ownerDepartmentId);
+
+    List<Document> findByTitleContainingIgnoreCaseAndParentIdIsNullAndOwnerDepartmentIdAndDeletedAtIsNull(String title, UUID ownerDepartmentId);
 }

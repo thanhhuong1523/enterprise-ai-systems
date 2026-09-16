@@ -35,6 +35,10 @@ public class RecoveryService implements ApplicationRunner {
 
     @Override
     public void run(ApplicationArguments args) {
+        if (!schedulerEnabled) {
+            log.info("Worker scheduler is disabled, skipping Startup Recovery.");
+            return;
+        }
         log.info("Executing Startup Recovery for interrupted processing tasks...");
         
         LocalDateTime now = LocalDateTime.now();

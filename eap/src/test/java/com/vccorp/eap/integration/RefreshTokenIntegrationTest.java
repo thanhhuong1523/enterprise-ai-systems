@@ -2,8 +2,8 @@ package com.vccorp.eap.integration;
 
 import com.vccorp.eap.common.error.ErrorCode;
 import com.vccorp.eap.common.exception.BusinessException;
-import com.vccorp.eap.service.AuthService;
-import com.vccorp.eap.service.JwtService;
+import com.vccorp.eap.service.auth.AuthService;
+import com.vccorp.eap.service.auth.JwtService;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;

@@ -1,6 +1,6 @@
 package com.vccorp.eap.service.mapper;
 
-import com.vccorp.eap.dto.DocumentResponse;
+import com.vccorp.eap.dto.document.DocumentResponse;
 import com.vccorp.eap.model.Document;
 import org.springframework.stereotype.Component;
 

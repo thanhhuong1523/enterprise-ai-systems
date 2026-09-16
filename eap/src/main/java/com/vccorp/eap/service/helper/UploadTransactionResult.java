@@ -1,6 +1,6 @@
 package com.vccorp.eap.service.helper;
 
-import com.vccorp.eap.dto.DocumentResponse;
+import com.vccorp.eap.dto.document.DocumentResponse;
 
 /**
  * Kết quả của việc thực thi giao dịch tải lên tài liệu (§4.2, ADR-008).

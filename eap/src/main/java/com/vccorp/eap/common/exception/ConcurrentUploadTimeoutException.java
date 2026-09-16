@@ -1,5 +1,7 @@
 package com.vccorp.eap.common.exception;
 
+import com.vccorp.eap.service.document.impl.DocumentServiceImpl;
+
 /**
  * Thrown by DocumentServiceImpl when pg_try_advisory_xact_lock cannot be acquired
  * after the maximum retry budget (5 retries, ~2 seconds of exponential backoff).

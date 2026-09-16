@@ -40,7 +40,7 @@ public class LlmClientImpl implements LlmClient {
 
     public LlmClientImpl(
             @Value("${gemini.api-key:}") String apiKey,
-            @Value("${gemini.model:gemini-3.5-flash}") String modelName,
+            @Value("${gemini.model:gemini-3.5-flash-lite}") String modelName,
             @Value("${gemini.base-url:https://generativelanguage.googleapis.com/v1beta/openai/chat/completions}") String baseUrl,
             @Value("${eap.llm.connect-timeout-ms:1000}") long connectTimeoutMs) {
         this.apiKey = apiKey;

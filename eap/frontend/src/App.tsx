@@ -1,6 +1,6 @@
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { AuthProvider } from '@/store/AuthContext';
+import { AuthProvider, useAuth } from '@/store/AuthContext';
 import { ThemeProvider } from '@/store/ThemeContext';
 import { ToastProvider } from '@/components/Toast';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
@@ -17,6 +17,14 @@ const queryClient = new QueryClient({
   },
 });
 
+const AuthenticatedChatWidget: React.FC = () => {
+  const { user, isAuthenticated } = useAuth();
+  if (!isAuthenticated || !user) {
+    return null;
+  }
+  return <ChatWidget key={user.id} />;
+};
+
 function App() {
   return (
     <ErrorBoundary>
@@ -25,7 +33,7 @@ function App() {
           <ToastProvider>
             <AuthProvider>
               <AppRoutes />
-              <ChatWidget />
+              <AuthenticatedChatWidget />
             </AuthProvider>
           </ToastProvider>
         </ThemeProvider>

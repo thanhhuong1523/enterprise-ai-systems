@@ -2,8 +2,8 @@ package com.vccorp.eap.service;
 
 import com.vccorp.eap.common.error.ErrorCode;
 import com.vccorp.eap.common.exception.BusinessException;
-import com.vccorp.eap.dto.LoginRequest;
-import com.vccorp.eap.dto.LoginResponse;
+import com.vccorp.eap.dto.auth.LoginRequest;
+import com.vccorp.eap.dto.auth.LoginResponse;
 import com.vccorp.eap.enums.Role;
 import com.vccorp.eap.model.User;
 import com.vccorp.eap.repository.UserRepository;
@@ -22,7 +22,9 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
-import com.vccorp.eap.service.impl.AuthServiceImpl;
+import com.vccorp.eap.service.auth.impl.AuthServiceImpl;
+import com.vccorp.eap.service.auth.JwtService;
+import com.vccorp.eap.service.auth.RefreshTokenService;
 
 @ExtendWith(MockitoExtension.class)
 public class AuthServiceTest {

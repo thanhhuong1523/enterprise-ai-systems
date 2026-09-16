@@ -1,6 +1,5 @@
 package com.vccorp.eap.worker.impl;
 
-import com.vccorp.eap.service.*;
 import com.vccorp.eap.worker.DocumentChunkProcessor;
 import com.vccorp.eap.repository.DocumentRepository;
 import org.slf4j.Logger;
@@ -9,6 +8,9 @@ import org.springframework.stereotype.Service;
 
 import java.util.Map;
 import java.util.UUID;
+import com.vccorp.eap.service.document.ChunkPersistenceService;
+import com.vccorp.eap.service.document.LlmMetadataExtractorService;
+import com.vccorp.eap.service.embedding.EmbeddingService;
 
 @Service
 public class DocumentChunkProcessorImpl implements DocumentChunkProcessor {

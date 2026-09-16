@@ -1,8 +1,9 @@
 package com.vccorp.eap.service.mapper;
 
-import com.vccorp.eap.dto.DepartmentResponse;
-import com.vccorp.eap.model.Department;
 import org.springframework.stereotype.Component;
+
+import com.vccorp.eap.dto.department.DepartmentResponse;
+import com.vccorp.eap.model.Department;
 
 /**
  * Mapper chịu trách nhiệm chuyển đổi Department entity sang DepartmentResponse DTO.
