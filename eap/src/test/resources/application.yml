@@ -49,6 +49,8 @@ spring:
         version: 1.0.0
         type: sync
         protocol: streamable
+        streamable-http:
+          mcp-endpoint: ${MCP_ENDPOINT:/mcp-v1}
     embedding:
       transformer:
         onnx:

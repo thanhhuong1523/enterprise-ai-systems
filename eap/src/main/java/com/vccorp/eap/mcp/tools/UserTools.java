@@ -1,5 +1,7 @@
 package com.vccorp.eap.mcp.tools;
 
+import com.vccorp.eap.common.error.ErrorCode;
+import com.vccorp.eap.common.exception.BusinessException;
 import com.vccorp.eap.dto.user.CreateUserRequest;
 import com.vccorp.eap.dto.user.UpdateUserRequest;
 import com.vccorp.eap.dto.user.UserResponse;
@@ -34,10 +36,28 @@ public class UserTools implements McpToolFacade {
             name = "getUserByName",
             description = "Tra cứu thông tin chi tiết và mã định danh UUID của một nhân viên theo họ tên hoặc tên đăng nhập. Trả về thông tin nhân sự kèm UUID để phục vụ các bước xâu chuỗi tiếp theo."
     )
-    public UserResponse getUserByName(
+    public Object getUserByName(
             @McpToolParam(description = "Họ tên đầy đủ hoặc tên đăng nhập của nhân viên cần tra cứu") String name
     ) {
-        return userService.getUserByName(name);
+        if (name == null || name.trim().isEmpty()) {
+            return "Tên người dùng không được để trống.";
+        }
+        String cleanName = name.trim();
+        User currentUser = SecurityContextHelper.getCurrentUserOrNull();
+        try {
+            return userService.getUserByName(cleanName);
+        } catch (BusinessException ex) {
+            if (currentUser != null && currentUser.getRole() != Role.SYSTEM_ADMIN) {
+                if (ex.getErrorCode() == ErrorCode.ERR_FORBIDDEN_ROLE || ex.getErrorCode() == ErrorCode.USER_NOT_FOUND) {
+                    return "Không tìm thấy người dùng '" + cleanName + "' trong phòng ban của bạn. Bạn không có quyền tra cứu nhân sự thuộc phòng ban khác.";
+                }
+            } else {
+                if (ex.getErrorCode() == ErrorCode.USER_NOT_FOUND) {
+                    return "Không tìm thấy người dùng '" + cleanName + "' trong hệ thống.";
+                }
+            }
+            throw ex;
+        }
     }
 
     /**
@@ -74,8 +94,13 @@ public class UserTools implements McpToolFacade {
             name = "listUsers",
             description = "Xem danh sách toàn bộ người dùng trong hệ thống. Chỉ dành cho Quản trị viên (ROLE_SYSTEM_ADMIN)."
     )
-    public List<UserResponse> listUsers() {
-        return userService.listUsers();
+    public Object listUsers() {
+        User currentUser = SecurityContextHelper.getCurrentUserOrNull();
+        if (currentUser == null || currentUser.getRole() != Role.SYSTEM_ADMIN) {
+            return "Bạn không có quyền xem danh sách toàn bộ nhân sự trong công ty. Thao tác này chỉ dành cho Quản trị viên.";
+        }
+        List<UserResponse> list = userService.listUsers();
+        return list != null ? list : java.util.Collections.emptyList();
     }
 
     /**
@@ -85,11 +110,20 @@ public class UserTools implements McpToolFacade {
             name = "listUsersByDepartment",
             description = "Xem danh sách nhân sự thuộc một phòng ban cụ thể. Quản trị viên có thể xem bất kỳ phòng ban nào, người dùng khác chỉ xem được nhân sự phòng ban của chính mình."
     )
-    public List<UserResponse> listUsersByDepartment(
+    public Object listUsersByDepartment(
             @McpToolParam(description = "Mã UUID của phòng ban cần xem danh sách nhân sự (lấy từ getDepartmentByName)") UUID departmentId
     ) {
-        User currentUser = SecurityContextHelper.getCurrentUser();
-        return userService.listUsersByDepartment(departmentId, currentUser);
+        User currentUser = SecurityContextHelper.getCurrentUserOrNull();
+        if (currentUser == null) {
+            return "Yêu cầu đăng nhập để xem danh sách nhân sự.";
+        }
+        if (currentUser.getRole() != Role.SYSTEM_ADMIN) {
+            if (currentUser.getDepartmentId() == null || !currentUser.getDepartmentId().equals(departmentId)) {
+                return "Bạn chỉ được phép xem danh sách nhân sự trong phòng ban của mình, không có quyền xem nhân sự của phòng ban khác.";
+            }
+        }
+        List<UserResponse> list = userService.listUsersByDepartment(departmentId, currentUser);
+        return list != null ? list : java.util.Collections.emptyList();
     }
 
     /**

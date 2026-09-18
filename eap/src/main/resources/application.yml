@@ -62,6 +62,8 @@ spring:
         version: 1.0.0
         type: sync
         protocol: streamable
+        streamable-http:
+          mcp-endpoint: /mcp-v1
     embedding:
       transformer:
         onnx:
@@ -71,7 +73,7 @@ spring:
 
 jwt:
   secret: ${JWT_SECRET:vcc-eap-super-secret-signing-key-256-bits-base64-secure-value-safe-for-hs256}
-  expiration-ms: 900000 # 15 minutes
+  expiration-ms: 9000000 # 15 minutes
   refresh-expiration-ms: 604800000 # 7 days
 
 gemini:

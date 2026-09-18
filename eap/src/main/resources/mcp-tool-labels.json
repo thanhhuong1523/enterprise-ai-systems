@@ -9,7 +9,9 @@
   },
   "getDepartmentByName": {
     "start": "Đang tra cứu thông tin phòng ban '{{name}}'...",
-    "end": "Đã tìm thấy thông tin phòng ban '{{name}}'"
+    "end": "Đã tìm thấy thông tin phòng ban '{{name}}'",
+    "notFound": "Không tìm thấy phòng ban '{{name}}' trong hệ thống. Vui lòng kiểm tra lại tên phòng ban.",
+    "errorCode": "DEPARTMENT_NOT_FOUND"
   },
   "updateDepartment": {
     "start": "Đang cập nhật thông tin phòng ban...",
@@ -25,7 +27,9 @@
   },
   "getDocumentByTitle": {
     "start": "Đang tìm kiếm tài liệu có tiêu đề '{{title}}'...",
-    "end": "Đã tìm thấy tài liệu '{{title}}'"
+    "end": "Đã tìm thấy tài liệu '{{title}}'",
+    "notFound": "Không tìm thấy tài liệu có tiêu đề '{{title}}' trong kho tri thức của phòng ban bạn.",
+    "errorCode": "ERR_DOCUMENT_NOT_FOUND"
   },
   "listOriginalDocuments": {
     "start": "Đang lấy danh sách tài liệu của phòng ban...",
@@ -61,7 +65,9 @@
   },
   "getUserByName": {
     "start": "Đang tra cứu thông tin người dùng '{{name}}'...",
-    "end": "Đã tìm thấy thông tin người dùng '{{name}}'"
+    "end": "Đã tìm thấy thông tin người dùng '{{name}}'",
+    "notFound": "Không tìm thấy người dùng '{{name}}' trong hệ thống. Vui lòng kiểm tra lại họ tên hoặc tên đăng nhập.",
+    "errorCode": "USER_NOT_FOUND"
   },
   "listUsers": {
     "start": "Đang lấy danh mục toàn bộ nhân sự...",

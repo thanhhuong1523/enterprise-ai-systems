@@ -8,6 +8,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
@@ -27,12 +28,15 @@ public class McpHttpLoggingFilter extends OncePerRequestFilter {
 
     private static final Logger log = LoggerFactory.getLogger(McpHttpLoggingFilter.class);
 
+    @Value("${spring.ai.mcp.server.streamable-http.mcp-endpoint:/mcp}")
+    private String mcpEndpoint;
+
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
             throws ServletException, IOException {
 
         String uri = request.getRequestURI();
-        if (!uri.startsWith("/mcp") && !uri.startsWith("/sse")) {
+        if (!uri.startsWith(mcpEndpoint) && !uri.startsWith("/sse")) {
             filterChain.doFilter(request, response);
             return;
         }

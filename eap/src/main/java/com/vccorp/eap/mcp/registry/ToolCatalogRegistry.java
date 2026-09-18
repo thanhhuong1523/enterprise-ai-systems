@@ -84,8 +84,14 @@ public class ToolCatalogRegistry {
                     String endLabel = (label != null && label.end() != null && !label.end().trim().isEmpty())
                             ? label.end().trim()
                             : "Hoàn tất thao tác " + name;
+                    String notFoundLabel = (label != null && label.notFound() != null && !label.notFound().trim().isEmpty())
+                            ? label.notFound().trim()
+                            : null;
+                    String errorCode = (label != null && label.errorCode() != null && !label.errorCode().trim().isEmpty())
+                            ? label.errorCode().trim()
+                            : null;
 
-                    ToolInfo info = new ToolInfo(name, description, inputSchema, startLabel, endLabel);
+                    ToolInfo info = new ToolInfo(name, description, inputSchema, startLabel, endLabel, notFoundLabel, errorCode);
                     toolsMap.put(name.toLowerCase(), info);
                     log.info("[ToolCatalogRegistry] Đã nạp thành công tool từ facade: '{}' (startLabel='{}')", name, startLabel);
                 }
@@ -112,8 +118,14 @@ public class ToolCatalogRegistry {
                     String endLabel = (label != null && label.end() != null && !label.end().trim().isEmpty())
                             ? label.end().trim()
                             : "Hoàn tất thao tác " + name;
+                    String notFoundLabel = (label != null && label.notFound() != null && !label.notFound().trim().isEmpty())
+                            ? label.notFound().trim()
+                            : null;
+                    String errorCode = (label != null && label.errorCode() != null && !label.errorCode().trim().isEmpty())
+                            ? label.errorCode().trim()
+                            : null;
 
-                    ToolInfo info = new ToolInfo(name, description, inputSchema, startLabel, endLabel);
+                    ToolInfo info = new ToolInfo(name, description, inputSchema, startLabel, endLabel, notFoundLabel, errorCode);
                     toolsMap.put(name.toLowerCase(), info);
                     log.info("[ToolCatalogRegistry] Đã nạp thành công tool từ callback provider: '{}' (startLabel='{}')", name, startLabel);
                 }

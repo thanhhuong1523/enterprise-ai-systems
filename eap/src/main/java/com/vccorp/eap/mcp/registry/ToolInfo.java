@@ -8,6 +8,11 @@ public record ToolInfo(
         String description,
         String inputSchema,
         String startLabel,
-        String endLabel
+        String endLabel,
+        String notFoundLabel,
+        String errorCode
 ) {
+    public ToolInfo(String name, String description, String inputSchema, String startLabel, String endLabel) {
+        this(name, description, inputSchema, startLabel, endLabel, null, null);
+    }
 }

@@ -65,12 +65,78 @@ class UserToolsTest {
                 .build();
         when(userService.getUserByName("Nguyễn Văn Hoàng")).thenReturn(response);
 
-        UserResponse result = userTools.getUserByName("Nguyễn Văn Hoàng");
+        Object result = userTools.getUserByName("Nguyễn Văn Hoàng");
 
         assertNotNull(result);
-        assertEquals("hoangnv", result.username());
-        assertEquals("Nguyễn Văn Hoàng", result.fullName());
+        assertTrue(result instanceof UserResponse);
+        UserResponse userResp = (UserResponse) result;
+        assertEquals("hoangnv", userResp.username());
+        assertEquals("Nguyễn Văn Hoàng", userResp.fullName());
         verify(userService, times(1)).getUserByName("Nguyễn Văn Hoàng");
+    }
+
+    @Test
+    void testGetUserByName_BlankName_ReturnsValidationMessage() {
+        Object result = userTools.getUserByName("   ");
+        assertEquals("Tên người dùng không được để trống.", result);
+    }
+
+    @Test
+    void testGetUserByName_NonAdmin_ForbiddenRole_ReturnsDepartmentScopedMessage() {
+        UUID deptId = UUID.randomUUID();
+        User employee = User.builder()
+                .id(UUID.randomUUID())
+                .username("employee")
+                .role(Role.ROLE_EMPLOYEE)
+                .departmentId(deptId)
+                .build();
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(employee, null,
+                        List.of(new SimpleGrantedAuthority(employee.getRole().name())))
+        );
+
+        when(userService.getUserByName("Người Khác")).thenThrow(
+                new com.vccorp.eap.common.exception.BusinessException(com.vccorp.eap.common.error.ErrorCode.ERR_FORBIDDEN_ROLE)
+        );
+
+        Object result = userTools.getUserByName("Người Khác");
+        assertTrue(result instanceof String);
+        assertTrue(((String) result).contains("trong phòng ban của bạn"));
+        assertTrue(((String) result).contains("không có quyền tra cứu"));
+    }
+
+    @Test
+    void testGetUserByName_NonAdmin_NotFound_ReturnsDepartmentScopedMessage() {
+        UUID deptId = UUID.randomUUID();
+        User employee = User.builder()
+                .id(UUID.randomUUID())
+                .username("employee")
+                .role(Role.ROLE_EMPLOYEE)
+                .departmentId(deptId)
+                .build();
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(employee, null,
+                        List.of(new SimpleGrantedAuthority(employee.getRole().name())))
+        );
+
+        when(userService.getUserByName("Không Tồn Tại")).thenThrow(
+                new com.vccorp.eap.common.exception.BusinessException(com.vccorp.eap.common.error.ErrorCode.USER_NOT_FOUND)
+        );
+
+        Object result = userTools.getUserByName("Không Tồn Tại");
+        assertTrue(result instanceof String);
+        assertTrue(((String) result).contains("trong phòng ban của bạn"));
+    }
+
+    @Test
+    void testGetUserByName_Admin_NotFound_ReturnsSystemNotFoundMessage() {
+        when(userService.getUserByName("Không Tồn Tại")).thenThrow(
+                new com.vccorp.eap.common.exception.BusinessException(com.vccorp.eap.common.error.ErrorCode.USER_NOT_FOUND)
+        );
+
+        Object result = userTools.getUserByName("Không Tồn Tại");
+        assertTrue(result instanceof String);
+        assertTrue(((String) result).contains("trong hệ thống"));
     }
 
     @Test
@@ -105,11 +171,41 @@ class UserToolsTest {
                 .build();
         when(userService.listUsers()).thenReturn(List.of(user));
 
-        List<UserResponse> result = userTools.listUsers();
+        @SuppressWarnings("unchecked")
+        List<UserResponse> result = (List<UserResponse>) userTools.listUsers();
 
         assertNotNull(result);
         assertEquals(1, result.size());
         verify(userService, times(1)).listUsers();
+    }
+
+    @Test
+    void testListUsers_WhenServiceReturnsNull_ReturnsEmptyList() {
+        when(userService.listUsers()).thenReturn(null);
+
+        @SuppressWarnings("unchecked")
+        List<UserResponse> result = (List<UserResponse>) userTools.listUsers();
+
+        assertNotNull(result);
+        assertTrue(result.isEmpty());
+        verify(userService, times(1)).listUsers();
+    }
+
+    @Test
+    void testListUsers_NonAdmin_ReturnsForbiddenMessage() {
+        User employee = User.builder()
+                .id(UUID.randomUUID())
+                .username("employee")
+                .role(Role.ROLE_EMPLOYEE)
+                .build();
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(employee, null,
+                        List.of(new SimpleGrantedAuthority(employee.getRole().name())))
+        );
+
+        Object result = userTools.listUsers();
+        assertTrue(result instanceof String);
+        assertTrue(((String) result).contains("không có quyền xem danh sách toàn bộ nhân sự"));
     }
 
     @Test
@@ -121,11 +217,45 @@ class UserToolsTest {
                 .build();
         when(userService.listUsersByDepartment(deptId, adminUser)).thenReturn(List.of(user));
 
-        List<UserResponse> result = userTools.listUsersByDepartment(deptId);
+        @SuppressWarnings("unchecked")
+        List<UserResponse> result = (List<UserResponse>) userTools.listUsersByDepartment(deptId);
 
         assertNotNull(result);
         assertEquals(1, result.size());
         verify(userService, times(1)).listUsersByDepartment(deptId, adminUser);
+    }
+
+    @Test
+    void testListUsersByDepartment_WhenServiceReturnsNull_ReturnsEmptyList() {
+        UUID deptId = UUID.randomUUID();
+        when(userService.listUsersByDepartment(deptId, adminUser)).thenReturn(null);
+
+        @SuppressWarnings("unchecked")
+        List<UserResponse> result = (List<UserResponse>) userTools.listUsersByDepartment(deptId);
+
+        assertNotNull(result);
+        assertTrue(result.isEmpty());
+        verify(userService, times(1)).listUsersByDepartment(deptId, adminUser);
+    }
+
+    @Test
+    void testListUsersByDepartment_NonAdmin_DifferentDepartment_ReturnsForbiddenMessage() {
+        UUID myDeptId = UUID.randomUUID();
+        UUID otherDeptId = UUID.randomUUID();
+        User employee = User.builder()
+                .id(UUID.randomUUID())
+                .username("employee")
+                .role(Role.ROLE_EMPLOYEE)
+                .departmentId(myDeptId)
+                .build();
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(employee, null,
+                        List.of(new SimpleGrantedAuthority(employee.getRole().name())))
+        );
+
+        Object result = userTools.listUsersByDepartment(otherDeptId);
+        assertTrue(result instanceof String);
+        assertTrue(((String) result).contains("chỉ được phép xem danh sách nhân sự trong phòng ban của mình"));
     }
 
     @Test

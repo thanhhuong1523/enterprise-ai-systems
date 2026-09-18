@@ -7,6 +7,8 @@ import com.fasterxml.jackson.annotation.JsonAlias;
  */
 public record ToolLabelEntry(
         @JsonAlias("startLabel") String start,
-        @JsonAlias("endLabel") String end
+        @JsonAlias("endLabel") String end,
+        @JsonAlias("notFoundLabel") String notFound,
+        String errorCode
 ) {
 }

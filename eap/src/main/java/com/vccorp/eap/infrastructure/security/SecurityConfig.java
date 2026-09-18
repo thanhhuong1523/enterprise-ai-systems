@@ -6,6 +6,7 @@ import com.vccorp.eap.common.response.ApiResponse;
 import jakarta.servlet.DispatcherType;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -32,6 +33,9 @@ public class SecurityConfig {
 
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
     private final ObjectMapper objectMapper;
+
+    @Value("${spring.ai.mcp.server.streamable-http.mcp-endpoint:/mcp}")
+    private String mcpEndpoint;
 
     public SecurityConfig(JwtAuthenticationFilter jwtAuthenticationFilter,
                           ObjectMapper objectMapper) {
@@ -68,8 +72,8 @@ public class SecurityConfig {
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/api/**", configuration);
-        source.registerCorsConfiguration("/mcp/**", configuration);
-        source.registerCorsConfiguration("/mcp", configuration);
+        source.registerCorsConfiguration(mcpEndpoint + "/**", configuration);
+        source.registerCorsConfiguration(mcpEndpoint, configuration);
         return source;
     }
 
@@ -96,7 +100,7 @@ public class SecurityConfig {
                 .requestMatchers("/v3/api-docs", "/v3/api-docs/**", "/v3/api-docs.yaml", "/swagger-ui/**", "/swagger-ui.html").permitAll()
                 
                 // MCP endpoint requires authentication with Bearer token
-                .requestMatchers("/mcp", "/mcp/**").authenticated()
+                .requestMatchers(mcpEndpoint, mcpEndpoint + "/**").authenticated()
                 // Autonomous AI Assistant endpoint
                 .requestMatchers("/api/v1/ai/assistant/**").authenticated()
                 // Departments: GET is accessible by any authenticated user (needed for dropdowns in DocumentsPage),

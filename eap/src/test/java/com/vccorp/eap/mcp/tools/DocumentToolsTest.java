@@ -83,11 +83,47 @@ class DocumentToolsTest {
         ).fileSize(1024L).build();
         when(documentService.getDocumentByTitle(title, testUser)).thenReturn(doc);
 
-        com.vccorp.eap.dto.document.DocumentResponse result = documentTools.getDocumentByTitle(title);
+        Object result = documentTools.getDocumentByTitle(title);
 
         assertNotNull(result);
-        assertEquals(title, result.getTitle());
+        assertTrue(result instanceof com.vccorp.eap.dto.document.DocumentResponse);
+        com.vccorp.eap.dto.document.DocumentResponse docResp = (com.vccorp.eap.dto.document.DocumentResponse) result;
+        assertEquals(title, docResp.getTitle());
         verify(documentService, times(1)).getDocumentByTitle(title, testUser);
+    }
+
+    @Test
+    void testGetDocumentByTitle_BlankTitle_ReturnsValidationMessage() {
+        Object result = documentTools.getDocumentByTitle("   ");
+        assertEquals("Tiêu đề tài liệu không được để trống.", result);
+    }
+
+    @Test
+    void testGetDocumentByTitle_NotFound_ReturnsDepartmentScopedMessage() {
+        when(documentService.getDocumentByTitle("Không Có", testUser)).thenThrow(
+                new com.vccorp.eap.common.exception.BusinessException(com.vccorp.eap.common.error.ErrorCode.ERR_DOCUMENT_NOT_FOUND)
+        );
+
+        Object result = documentTools.getDocumentByTitle("Không Có");
+        assertTrue(result instanceof String);
+        assertTrue(((String) result).contains("Không tìm thấy tài liệu"));
+    }
+
+    @Test
+    void testGetDocumentByTitle_Admin_ReturnsForbiddenMessage() {
+        User adminUser = User.builder()
+                .id(UUID.randomUUID())
+                .username("admin")
+                .role(Role.SYSTEM_ADMIN)
+                .build();
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(adminUser, null,
+                        List.of(new SimpleGrantedAuthority(adminUser.getRole().name())))
+        );
+
+        Object result = documentTools.getDocumentByTitle("Quy chế");
+        assertTrue(result instanceof String);
+        assertTrue(((String) result).contains("Quản trị viên không có quyền truy cập"));
     }
 
     @Test
@@ -107,30 +143,71 @@ class DocumentToolsTest {
 
     @Test
     void testUpdateOriginalDocument_DelegatesToDocumentService() {
+        User managerUser = User.builder()
+                .id(UUID.randomUUID())
+                .username("manager")
+                .role(Role.ROLE_DEPT_MANAGER)
+                .departmentId(deptId)
+                .build();
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(managerUser, null,
+                        List.of(new SimpleGrantedAuthority(managerUser.getRole().name())))
+        );
+
         UUID id = UUID.randomUUID();
         String newTitle = "Quy chế mới";
         com.vccorp.eap.dto.document.DocumentResponse doc = com.vccorp.eap.dto.document.DocumentResponse.builder(
                 id, "DOC-001", newTitle, deptId, java.time.LocalDateTime.now()
         ).fileSize(1024L).build();
-        when(documentService.updateOriginalDocument(id, newTitle, testUser)).thenReturn(doc);
+        when(documentService.updateOriginalDocument(id, newTitle, managerUser)).thenReturn(doc);
 
-        com.vccorp.eap.dto.document.DocumentResponse result = documentTools.updateOriginalDocument(id, newTitle);
+        Object result = documentTools.updateOriginalDocument(id, newTitle);
 
         assertNotNull(result);
-        assertEquals(newTitle, result.getTitle());
-        verify(documentService, times(1)).updateOriginalDocument(id, newTitle, testUser);
+        assertTrue(result instanceof com.vccorp.eap.dto.document.DocumentResponse);
+        com.vccorp.eap.dto.document.DocumentResponse docResp = (com.vccorp.eap.dto.document.DocumentResponse) result;
+        assertEquals(newTitle, docResp.getTitle());
+        verify(documentService, times(1)).updateOriginalDocument(id, newTitle, managerUser);
+    }
+
+    @Test
+    void testUpdateOriginalDocument_EmployeeRole_ReturnsForbiddenMessage() {
+        UUID id = UUID.randomUUID();
+        Object result = documentTools.updateOriginalDocument(id, "Tiêu đề mới");
+        assertTrue(result instanceof String);
+        assertTrue(((String) result).contains("không có quyền cập nhật tài liệu"));
     }
 
     @Test
     void testDeleteOriginalDocument_DelegatesToDocumentService() {
-        UUID id = UUID.randomUUID();
-        doNothing().when(documentService).deleteOriginalDocument(id, testUser);
+        User managerUser = User.builder()
+                .id(UUID.randomUUID())
+                .username("manager")
+                .role(Role.ROLE_DEPT_MANAGER)
+                .departmentId(deptId)
+                .build();
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(managerUser, null,
+                        List.of(new SimpleGrantedAuthority(managerUser.getRole().name())))
+        );
 
-        String result = documentTools.deleteOriginalDocument(id);
+        UUID id = UUID.randomUUID();
+        doNothing().when(documentService).deleteOriginalDocument(id, managerUser);
+
+        Object result = documentTools.deleteOriginalDocument(id);
 
         assertNotNull(result);
-        assertTrue(result.contains("thành công"));
-        verify(documentService, times(1)).deleteOriginalDocument(id, testUser);
+        assertTrue(result instanceof String);
+        assertTrue(((String) result).contains("thành công"));
+        verify(documentService, times(1)).deleteOriginalDocument(id, managerUser);
+    }
+
+    @Test
+    void testDeleteOriginalDocument_EmployeeRole_ReturnsForbiddenMessage() {
+        UUID id = UUID.randomUUID();
+        Object result = documentTools.deleteOriginalDocument(id);
+        assertTrue(result instanceof String);
+        assertTrue(((String) result).contains("không có quyền xóa tài liệu"));
     }
 
     @Test
@@ -189,5 +266,51 @@ class DocumentToolsTest {
         assertNotNull(result);
         assertTrue(result.contains("thành công"));
         verify(documentService, times(1)).deleteAlias(aliasId, testUser);
+    }
+
+    @Test
+    void testListOriginalDocuments_WhenPageIsNull_ReturnsEmptyList() {
+        when(documentService.listOriginalDocuments(0, 10, testUser)).thenReturn(null);
+
+        List<com.vccorp.eap.dto.document.DocumentResponse> result = documentTools.listOriginalDocuments(0, 10);
+
+        assertNotNull(result);
+        assertTrue(result.isEmpty());
+        verify(documentService, times(1)).listOriginalDocuments(0, 10, testUser);
+    }
+
+    @Test
+    void testListSharedDocuments_WhenPageIsNull_ReturnsEmptyList() {
+        when(documentService.listSharedDocuments(0, 10, testUser)).thenReturn(null);
+
+        List<com.vccorp.eap.dto.document.DocumentResponse> result = documentTools.listSharedDocuments(0, 10);
+
+        assertNotNull(result);
+        assertTrue(result.isEmpty());
+        verify(documentService, times(1)).listSharedDocuments(0, 10, testUser);
+    }
+
+    @Test
+    void testListDocumentAliases_WhenServiceReturnsNull_ReturnsEmptyList() {
+        UUID originalDocId = UUID.randomUUID();
+        when(documentService.listDocumentAliases(originalDocId, testUser)).thenReturn(null);
+
+        List<com.vccorp.eap.dto.document.DocumentResponse> result = documentTools.listDocumentAliases(originalDocId);
+
+        assertNotNull(result);
+        assertTrue(result.isEmpty());
+        verify(documentService, times(1)).listDocumentAliases(originalDocId, testUser);
+    }
+
+    @Test
+    void testSearchDocuments_WhenServiceReturnsNull_ReturnsFallbackResponse() {
+        when(retrievalService.search(any(), eq(testUser))).thenReturn(null);
+
+        RagChatResponse result = documentTools.searchDocuments("test query");
+
+        assertNotNull(result);
+        assertNotNull(result.chunks());
+        assertTrue(result.chunks().isEmpty());
+        assertTrue(result.response().contains("Không tìm thấy"));
     }
 }

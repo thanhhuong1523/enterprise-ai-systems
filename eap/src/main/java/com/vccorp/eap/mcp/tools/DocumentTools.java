@@ -1,9 +1,12 @@
 package com.vccorp.eap.mcp.tools;
 
+import com.vccorp.eap.common.error.ErrorCode;
+import com.vccorp.eap.common.exception.BusinessException;
 import com.vccorp.eap.dto.document.CreateAliasRequest;
 import com.vccorp.eap.dto.document.DocumentResponse;
 import com.vccorp.eap.dto.search.RagChatRequest;
 import com.vccorp.eap.dto.search.RagChatResponse;
+import com.vccorp.eap.enums.Role;
 import com.vccorp.eap.infrastructure.security.SecurityContextHelper;
 import com.vccorp.eap.model.User;
 import com.vccorp.eap.service.document.DocumentService;
@@ -50,7 +53,8 @@ public class DocumentTools implements McpToolFacade {
             @McpToolParam(description = "Câu hỏi hoặc từ khóa tìm kiếm thông tin") String query
     ) {
         User currentUser = SecurityContextHelper.getCurrentUserOrNull();
-        return retrievalService.search(new RagChatRequest(query), currentUser);
+        RagChatResponse response = retrievalService.search(new RagChatRequest(query), currentUser);
+        return response != null ? response : new RagChatResponse("Không tìm thấy thông tin phù hợp.", java.util.Collections.emptyList());
     }
 
     /**
@@ -60,11 +64,31 @@ public class DocumentTools implements McpToolFacade {
             name = "getDocumentByTitle",
             description = "Tra cứu tài liệu theo tiêu đề trong kho tri thức của phòng ban để lấy mã định danh UUID phục vụ cho các thao tác cập nhật, xóa, hoặc chia sẻ liên kết Alias."
     )
-    public DocumentResponse getDocumentByTitle(
+    public Object getDocumentByTitle(
             @McpToolParam(description = "Tiêu đề của tài liệu cần tra cứu (ví dụ: 'Quy chế lương thưởng 2026')") String title
     ) {
-        User currentUser = SecurityContextHelper.getCurrentUser();
-        return documentService.getDocumentByTitle(title, currentUser);
+        if (title == null || title.trim().isEmpty()) {
+            return "Tiêu đề tài liệu không được để trống.";
+        }
+        String cleanTitle = title.trim();
+        User currentUser = SecurityContextHelper.getCurrentUserOrNull();
+        if (currentUser == null) {
+            return "Yêu cầu đăng nhập để tra cứu tài liệu.";
+        }
+        if (currentUser.getRole() == Role.SYSTEM_ADMIN) {
+            return "Tài khoản Quản trị viên không có quyền truy cập kho tài liệu nghiệp vụ phòng ban.";
+        }
+        try {
+            return documentService.getDocumentByTitle(cleanTitle, currentUser);
+        } catch (BusinessException ex) {
+            if (ex.getErrorCode() == ErrorCode.ERR_DOCUMENT_NOT_FOUND) {
+                return "Không tìm thấy tài liệu có tiêu đề '" + cleanTitle + "' trong kho tri thức của phòng ban bạn.";
+            }
+            if (ex.getErrorCode() == ErrorCode.ERR_FORBIDDEN_ROLE) {
+                return "Bạn không có quyền truy cập tài liệu này.";
+            }
+            throw ex;
+        }
     }
 
     /**
@@ -81,7 +105,10 @@ public class DocumentTools implements McpToolFacade {
         User currentUser = SecurityContextHelper.getCurrentUser();
         int pageIndex = page != null ? page : 0;
         int pageSize = size != null ? size : 10;
-        return documentService.listOriginalDocuments(pageIndex, pageSize, currentUser).getContent();
+        var pageResult = documentService.listOriginalDocuments(pageIndex, pageSize, currentUser);
+        return (pageResult != null && pageResult.getContent() != null)
+                ? pageResult.getContent()
+                : java.util.Collections.emptyList();
     }
 
     /**
@@ -91,11 +118,17 @@ public class DocumentTools implements McpToolFacade {
             name = "updateOriginalDocument",
             description = "Cập nhật tiêu đề tài liệu gốc theo mã định danh UUID. Người thực hiện phải thuộc phòng ban sở hữu tài liệu và có vai trò Trưởng phòng (ROLE_DEPT_MANAGER) hoặc Ban Giám đốc (ROLE_BOARD)."
     )
-    public DocumentResponse updateOriginalDocument(
+    public Object updateOriginalDocument(
             @McpToolParam(description = "Mã UUID của tài liệu gốc cần cập nhật (lấy từ getDocumentByTitle)") UUID id,
             @McpToolParam(description = "Tiêu đề mới của tài liệu") String title
     ) {
-        User currentUser = SecurityContextHelper.getCurrentUser();
+        User currentUser = SecurityContextHelper.getCurrentUserOrNull();
+        if (currentUser == null) {
+            return "Yêu cầu đăng nhập để cập nhật tài liệu.";
+        }
+        if (currentUser.getRole() != Role.ROLE_DEPT_MANAGER && currentUser.getRole() != Role.ROLE_BOARD) {
+            return "Bạn không có quyền cập nhật tài liệu. Thao tác chỉ dành cho Trưởng phòng (ROLE_DEPT_MANAGER) hoặc Ban Giám đốc (ROLE_BOARD).";
+        }
         return documentService.updateOriginalDocument(id, title, currentUser);
     }
 
@@ -106,10 +139,16 @@ public class DocumentTools implements McpToolFacade {
             name = "deleteOriginalDocument",
             description = "Xóa tài liệu gốc khỏi kho tri thức theo mã định danh UUID. Chỉ Trưởng phòng (ROLE_DEPT_MANAGER) hoặc Ban Giám đốc (ROLE_BOARD) mới có quyền xóa."
     )
-    public String deleteOriginalDocument(
+    public Object deleteOriginalDocument(
             @McpToolParam(description = "Mã UUID của tài liệu gốc cần xóa (lấy từ getDocumentByTitle)") UUID id
     ) {
-        User currentUser = SecurityContextHelper.getCurrentUser();
+        User currentUser = SecurityContextHelper.getCurrentUserOrNull();
+        if (currentUser == null) {
+            return "Yêu cầu đăng nhập để xóa tài liệu.";
+        }
+        if (currentUser.getRole() != Role.ROLE_DEPT_MANAGER && currentUser.getRole() != Role.ROLE_BOARD) {
+            return "Bạn không có quyền xóa tài liệu. Thao tác chỉ dành cho Trưởng phòng (ROLE_DEPT_MANAGER) hoặc Ban Giám đốc (ROLE_BOARD).";
+        }
         documentService.deleteOriginalDocument(id, currentUser);
         return "Đã xóa tài liệu gốc thành công.";
     }
@@ -144,7 +183,10 @@ public class DocumentTools implements McpToolFacade {
         User currentUser = SecurityContextHelper.getCurrentUser();
         int pageIndex = page != null ? page : 0;
         int pageSize = size != null ? size : 10;
-        return documentService.listSharedDocuments(pageIndex, pageSize, currentUser).getContent();
+        var pageResult = documentService.listSharedDocuments(pageIndex, pageSize, currentUser);
+        return (pageResult != null && pageResult.getContent() != null)
+                ? pageResult.getContent()
+                : java.util.Collections.emptyList();
     }
 
     /**
@@ -158,7 +200,8 @@ public class DocumentTools implements McpToolFacade {
             @McpToolParam(description = "Mã UUID của tài liệu gốc (lấy từ getDocumentByTitle)") UUID originalDocumentId
     ) {
         User currentUser = SecurityContextHelper.getCurrentUser();
-        return documentService.listDocumentAliases(originalDocumentId, currentUser);
+        List<DocumentResponse> list = documentService.listDocumentAliases(originalDocumentId, currentUser);
+        return list != null ? list : java.util.Collections.emptyList();
     }
 
     /**
